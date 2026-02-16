@@ -16,7 +16,6 @@
 #include "HandlerTracksGO.h"
 #include "Droxtal.h"
 #include "ADDAField.h"
-#include "ScatteringConvex.h"
 
 #ifdef _OUTPUT_NRG_CONV
 ofstream energyFile("energy.dat", ios::out);
@@ -68,6 +67,8 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("log", 1, true); // time of writing progress (in seconds)
     parser.AddRule("adda", 0, true); // ADDA mode: compute internal field and output for ADDA
     parser.AddRule("dpl", 1, true); // dipoles per wavelength for ADDA grid (default 10)
+    parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
+    parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model instead of GO
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -372,16 +373,7 @@ int main(int argc, const char* argv[])
 
             // Set up segment collection
             std::vector<InternalBeamSegment> segments;
-            ScatteringConvex *sc = dynamic_cast<ScatteringConvex*>(tracer.m_scattering);
-            if (sc)
-            {
-                sc->SetInternalSegmentStorage(&segments);
-            }
-            else
-            {
-                cerr << "ERROR: -adda only works with convex particles" << endl;
-                exit(1);
-            }
+            tracer.m_scattering->SetInternalSegmentStorage(&segments);
 
             // Run GO tracing (particle already rotated)
             vector<Beam> outBeams;
@@ -392,11 +384,20 @@ int main(int argc, const char* argv[])
 
             cout << "Captured " << segments.size() << " internal beam segments" << endl;
 
-            // Accumulate field contributions from all beam segments
-            for (size_t si = 0; si < segments.size(); ++si)
+            // Per-facet refracted plane waves with boundary smoothing
+            addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction);
+
+            // Reflections: GO-traced nActs=1 beams (default), Fabry-Perot (--fp), or none (--norefl)
+            if (!args.IsCatched("norefl"))
             {
-                addaField.AccumulateBeamContribution(segments[si]);
+                if (args.IsCatched("fp"))
+                    addaField.AddPerFacetReflection(tracer.m_incidentLight.direction);
+                else
+                    addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction);
             }
+
+            // Diagnose GO+PW field
+            addaField.DiagnoseGOvsPW(tracer.m_incidentLight.direction);
 
             // Output ADDA files
             addaField.WriteGeometryFile(dirName + "_shape.dat");
@@ -404,7 +405,7 @@ int main(int argc, const char* argv[])
             addaField.WriteFieldFileX(dirName + "_fieldX.dat");
 
             // Clean up
-            sc->SetInternalSegmentStorage(nullptr);
+            tracer.m_scattering->SetInternalSegmentStorage(nullptr);
 
             cout << "\nADDA usage:" << endl;
             cout << "  adda -shape read " << dirName << "_shape.dat"

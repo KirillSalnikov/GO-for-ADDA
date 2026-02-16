@@ -135,6 +135,7 @@ bool ScatteringConvex::SplitSecondaryBeams(Beam &incidentBeam, int facetID,
 
         seg.exitNormal = m_facets[facetID].in_normal;
         seg.exitD = m_facets[facetID].in_normal.d_param;
+        seg.nActs = incidentBeam.nActs;
 
         m_internalSegments->push_back(seg);
     }

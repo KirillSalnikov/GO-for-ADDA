@@ -7,6 +7,9 @@
 #include "Splitting.h"
 
 #include <float.h>
+#include <vector>
+
+struct InternalBeamSegment;
 
 //#define MAX_BEAM_REFL_NUM 32768
 #define MAX_BEAM_REFL_NUM 65536
@@ -37,7 +40,14 @@ public:
     double m_wave;
     double restriction = 100;
 
+    /// Set storage for capturing internal beam segments (for ADDA mode)
+    void SetInternalSegmentStorage(std::vector<InternalBeamSegment> *s)
+    {
+        m_internalSegments = s;
+    }
+
 protected:
+    std::vector<InternalBeamSegment> *m_internalSegments = nullptr;
     Facet *m_facets;
     Splitting splitting;
     Light *m_incidentLight;

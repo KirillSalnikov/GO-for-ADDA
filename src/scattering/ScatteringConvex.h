@@ -15,17 +15,9 @@ public:
     bool ScatterLight(double, double, const std::vector<std::vector<int>> &,
                       std::vector<Beam> &) override; ///> for predefined trajectories
 
-    /// Set storage for capturing internal beam segments (for ADDA mode)
-    void SetInternalSegmentStorage(std::vector<InternalBeamSegment> *s)
-    {
-        m_internalSegments = s;
-    }
-
 protected:
     void TraceInternalBeams(std::vector<Beam> &outBeams);
 
     bool SplitSecondaryBeams(Beam &incidentBeam, int facetID,
                              Beam &inBeam, std::vector<Beam> &outBeams);
-
-    std::vector<InternalBeamSegment> *m_internalSegments = nullptr;
 };

@@ -1,4 +1,5 @@
 #include "ScatteringNonConvex.h"
+#include "ADDAField.h"
 
 #include "macro.h"
 #include <tgmath.h>
@@ -438,6 +439,48 @@ bool ScatteringNonConvex::SplitBeams(std::vector<Beam> &scaterredBeams)
         {
             CutExternalBeam(beam, scaterredBeams);
         }
+        else if (m_internalSegments && beam.location == Location::In)
+        {
+            // Terminal In-beam: capture segment to nearest visible facet
+            // so that dipoles in this beam's path still get GO field coverage
+            IntArray facetIds;
+            SelectVisibleFacets(beam, facetIds);
+            for (unsigned i = 0; i < facetIds.size; ++i)
+            {
+                int facetId = facetIds.arr[i];
+                Polygon intersection;
+                Intersect(facetId, beam, intersection);
+                if (intersection.nVertices >= MIN_VERTEX_NUM)
+                {
+                    InternalBeamSegment seg;
+                    seg.J = beam.J;
+                    seg.direction = beam.direction;
+                    seg.polarizationBasis = beam.polarizationBasis;
+                    seg.opticalPath = beam.opticalPath;
+                    seg.front = beam.front;
+
+                    seg.polyNVertices = intersection.nVertices;
+                    for (int vi = 0; vi < intersection.nVertices; ++vi)
+                        seg.polyArr[vi] = intersection.arr[vi];
+
+                    seg.entryFacetId = beam.lastFacetId;
+                    seg.exitFacetId = facetId;
+
+                    Point3f exitCenter = intersection.Center();
+                    double t = DotProductD(Point3d(beam.direction),
+                                           Point3d(exitCenter))
+                             + beam.front;
+                    seg.segmentLength = fabs(t);
+
+                    seg.exitNormal = m_facets[facetId].in_normal;
+                    seg.exitD = m_facets[facetId].in_normal.d_param;
+                    seg.nActs = beam.nActs;
+
+                    m_internalSegments->push_back(seg);
+                    break;  // one segment per terminal beam is enough
+                }
+            }
+        }
     }
 
     return true;
@@ -725,6 +768,35 @@ bool ScatteringNonConvex::SplitBeamByFacet(const Polygon &intersection,
     if (newId == 3496)
         int fff = 0;
 #endif
+
+    // Capture internal beam segment for ADDA field computation
+    if (m_internalSegments && beam.location == Location::In)
+    {
+        InternalBeamSegment seg;
+        seg.J = beam.J;
+        seg.direction = beam.direction;
+        seg.polarizationBasis = beam.polarizationBasis;
+        seg.opticalPath = beam.opticalPath;
+        seg.front = beam.front;
+
+        seg.polyNVertices = intersection.nVertices;
+        for (int vi = 0; vi < intersection.nVertices; ++vi)
+            seg.polyArr[vi] = intersection.arr[vi];
+
+        seg.entryFacetId = beam.lastFacetId;
+        seg.exitFacetId = facetId;
+
+        Point3f exitCenter = intersection.Center();
+        double t = DotProductD(Point3d(beam.direction), Point3d(exitCenter))
+                 + beam.front;
+        seg.segmentLength = fabs(t);
+
+        seg.exitNormal = m_facets[facetId].in_normal;
+        seg.exitD = m_facets[facetId].in_normal.d_param;
+        seg.nActs = beam.nActs;
+
+        m_internalSegments->push_back(seg);
+    }
 
     bool hasOutBeam = SetOpticalBeamParams(facet, beam, inBeam, outBeam);
 

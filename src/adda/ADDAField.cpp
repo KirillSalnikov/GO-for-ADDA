@@ -1299,7 +1299,7 @@ void ADDAFieldComputer::AddPerFacetReflection(const Point3f &incidentDir)
 void ADDAFieldComputer::AccumulateReflectedBeams(
     const std::vector<InternalBeamSegment> &segments,
     const Point3f &incidentDir, double maxJonesNorm,
-    bool useDiffraction)
+    bool useDiffraction, double minFresnelNum)
 {
     double re_n = real(m_ri);
     double im_n = imag(m_ri);
@@ -1309,8 +1309,11 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
     double iDirY = (double)incidentDir.cy;
     double iDirZ = (double)incidentDir.cz;
 
+    double lambda_eff = m_wavelength / re_n;
+
     int nProcessed = 0;
     int nSkippedNorm = 0;
+    int nSkippedFresnel = 0;
     int nDipolesUpdated = 0;
     int nSmoothed = 0;
     int nEntryMissed = 0;
@@ -1328,6 +1331,26 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
         {
             ++nSkippedNorm;
             continue;
+        }
+
+        // Fresnel number filter: N_F = polyArea / (lambda_eff * segmentLength)
+        // Skip beams where GO is invalid (N_F < 1)
+        if (seg.polyNVertices >= 3 && seg.segmentLength > 1e-10)
+        {
+            double polyArea = 0;
+            for (int vi = 1; vi < seg.polyNVertices - 1; ++vi)
+            {
+                Point3f e1 = seg.polyArr[vi] - seg.polyArr[0];
+                Point3f e2 = seg.polyArr[vi + 1] - seg.polyArr[0];
+                polyArea += Length(CrossProduct(e1, e2));
+            }
+            polyArea *= 0.5;
+            double fresnelNum = polyArea / (lambda_eff * seg.segmentLength);
+            if (fresnelNum < minFresnelNum)
+            {
+                ++nSkippedFresnel;
+                continue;
+            }
         }
 
         ++nProcessed;
@@ -1368,8 +1391,6 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
         double dIncX = dDir.x - 2.0 * dDotN * nBx;
         double dIncY = dDir.y - 2.0 * dDotN * nBy;
         double dIncZ = dDir.z - 2.0 * dDotN * nBz;
-
-        double lambda_eff = m_wavelength / re_n;
 
         // Back-project exit polygon to reflection facet B for Kirchhoff integral.
         // Only needed when diffraction weighting is enabled (--diffr flag).
@@ -1615,6 +1636,7 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
 
     cout << "GO reflected beams (nActs=1): " << nProcessed << " segments processed, "
          << nSkippedNorm << " skipped (|J|>" << maxJonesNorm << "), "
+         << nSkippedFresnel << " skipped (N_F<" << minFresnelNum << "), "
          << nDipolesUpdated << " dipole updates, "
          << nSmoothed << " Kirchhoff-weighted, "
          << nEntryMissed << " entry-facet misses" << endl;

@@ -109,7 +109,8 @@ public:
     void AccumulateReflectedBeams(const std::vector<InternalBeamSegment> &segments,
                                    const Point3f &incidentDir,
                                    double maxJonesNorm = 0.5,
-                                   bool useDiffraction = false);
+                                   bool useDiffraction = false,
+                                   double minFresnelNum = 1.0);
 
     /// Print contribution stats and compare GO field vs per-facet PW for covered dipoles
     void DiagnoseGOvsPW(const Point3f &incidentDir);

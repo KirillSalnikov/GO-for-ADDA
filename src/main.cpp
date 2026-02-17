@@ -100,6 +100,7 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
     parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model instead of GO
     parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for GO reflections
+    parser.AddRule("nf", 1, true); // minimum Fresnel number for GO reflected beams (default 1.0)
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -428,8 +429,11 @@ int main(int argc, const char* argv[])
                 if (args.IsCatched("fp"))
                     addaField.AddPerFacetReflection(tracer.m_incidentLight.direction);
                 else
+                {
+                    double minNF = args.IsCatched("nf") ? args.GetDoubleValue("nf") : 1.0;
                     addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
-                                                       0.5, args.IsCatched("diffr"));
+                                                       0.5, args.IsCatched("diffr"), minNF);
+                }
             }
 
             // Diagnose GO+PW field

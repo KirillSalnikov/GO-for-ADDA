@@ -938,6 +938,273 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir)
          << ", primary-facet fallback: " << fallbackFilled << endl;
 }
 
+void ADDAFieldComputer::AddAnalyticalReflection(const Point3f &incidentDir)
+{
+    double re_n = real(m_ri);
+    double im_n = imag(m_ri);
+
+    double ix = (double)incidentDir.cx;
+    double iy = (double)incidentDir.cy;
+    double iz = (double)incidentDir.cz;
+
+    static const double FAR_ZONE_DISTANCE = 10000.0;
+
+    struct FacetRefl {
+        int entryId;
+        int exitId;
+        Point3f reflDir;
+        double EY_x, EY_y, EY_z;
+        double EX_x, EX_y, EX_z;
+        double phaseRef;
+        double exitPt_x, exitPt_y, exitPt_z;
+        double pathToExit; // internal path from entry to exit (for absorption)
+    };
+
+    vector<FacetRefl> reflList;
+
+    for (int f = 0; f < m_particle->nFacets; ++f)
+    {
+        const Facet &entry = m_particle->facets[f];
+        double nx = (double)entry.in_normal.cx;
+        double ny = (double)entry.in_normal.cy;
+        double nz = (double)entry.in_normal.cz;
+        double cosI = ix*nx + iy*ny + iz*nz;
+        if (cosI < 1e-6) continue;
+
+        // Snell refraction at entry
+        double sinIsq = 1.0 - cosI*cosI;
+        double cosT = sqrt(fmax(0.0, 1.0 - sinIsq/(re_n*re_n)));
+        double eta = 1.0 / re_n;
+        double Cv = cosT - eta * cosI;
+        double rdx = eta*ix + Cv*nx;
+        double rdy = eta*iy + Cv*ny;
+        double rdz = eta*iz + Cv*nz;
+        double rlen = sqrt(rdx*rdx + rdy*rdy + rdz*rdz);
+        rdx /= rlen; rdy /= rlen; rdz /= rlen;
+
+        // Entry Fresnel transmission
+        double Ts_entry = 2.0*cosI / (cosI + re_n*cosT);
+        double Tp_entry = 2.0*cosI / (re_n*cosI + cosT);
+
+        // Find exit facet: trace refracted beam from entry center
+        int exitId = -1;
+        double minT = 1e30;
+        for (int g = 0; g < m_particle->nFacets; ++g)
+        {
+            if (g == f) continue;
+            const Facet &exitFac = m_particle->facets[g];
+            double dnr = rdx*exitFac.in_normal.cx + rdy*exitFac.in_normal.cy + rdz*exitFac.in_normal.cz;
+            if (dnr > -1e-6) continue;
+            double dp = entry.center.cx*exitFac.in_normal.cx
+                      + entry.center.cy*exitFac.in_normal.cy
+                      + entry.center.cz*exitFac.in_normal.cz
+                      + exitFac.in_normal.d_param;
+            double t = -dp / dnr;
+            if (t > 1e-6 && t < minT)
+            {
+                minT = t;
+                exitId = g;
+            }
+        }
+        if (exitId < 0) continue;
+
+        const Facet &exitFac = m_particle->facets[exitId];
+
+        // Check face pair geometry: only near-anti-parallel faces give crystal-filling PW
+        double enx = (double)exitFac.in_normal.cx;
+        double eny = (double)exitFac.in_normal.cy;
+        double enz = (double)exitFac.in_normal.cz;
+        double nn_dot = nx*enx + ny*eny + nz*enz;
+        if (nn_dot > -0.5) continue;  // skip non-anti-parallel pairs
+
+        // Internal incidence angle at exit facet
+        double cosI_exit = -(rdx*enx + rdy*eny + rdz*enz);
+        if (cosI_exit < 1e-6) continue;
+
+        // TIR check — skip total internal reflection
+        double sinI_exit_sq = 1.0 - cosI_exit*cosI_exit;
+        double sinT_exit_sq = sinI_exit_sq * re_n * re_n;
+        if (sinT_exit_sq > 1.0) continue;
+
+        double cosT_exit = sqrt(1.0 - sinT_exit_sq);
+
+        // Fresnel reflection at exit (crystal→air)
+        double Rs = (re_n*cosI_exit - cosT_exit) / (re_n*cosI_exit + cosT_exit);
+        double Rp = (cosI_exit - re_n*cosT_exit) / (cosI_exit + re_n*cosT_exit);
+
+        // Skip large reflections — PW model error grows with |R|
+        if (fabs(Rs) > 0.25 || fabs(Rp) > 0.25) continue;
+
+        // Reflected direction
+        double reflx = rdx + 2.0*cosI_exit*enx;
+        double refly = rdy + 2.0*cosI_exit*eny;
+        double reflz = rdz + 2.0*cosI_exit*enz;
+        double refll = sqrt(reflx*reflx + refly*refly + reflz*reflz);
+        reflx /= refll; refly /= refll; reflz /= refll;
+
+        // s/p decomposition at entry
+        double sx = iy*rdz - iz*rdy;
+        double sy = iz*rdx - ix*rdz;
+        double sz = ix*rdy - iy*rdx;
+        double slen = sqrt(sx*sx + sy*sy + sz*sz);
+
+        double rEY_x, rEY_y, rEY_z;
+        double rEX_x, rEX_y, rEX_z;
+
+        if (slen < 1e-6)
+        {
+            // Normal incidence
+            double R = Rs;
+            double EY_amp = Ts_entry * R;
+            double EX_amp = Ts_entry * R;
+            rEY_x = 0; rEY_y = EY_amp; rEY_z = 0;
+            rEX_x = -EX_amp; rEX_y = 0; rEX_z = 0;
+        }
+        else
+        {
+            sx /= slen; sy /= slen; sz /= slen;
+            // p for incident wave at entry
+            double pix_ = sy*iz - sz*iy;
+            double piy_ = sz*ix - sx*iz;
+            double piz_ = sx*iy - sy*ix;
+            double pilen = sqrt(pix_*pix_ + piy_*piy_ + piz_*piz_);
+            pix_ /= pilen; piy_ /= pilen; piz_ /= pilen;
+            // p for refracted wave
+            double pfx = sy*rdz - sz*rdy;
+            double pfy = sz*rdx - sx*rdz;
+            double pfz = sx*rdy - sy*rdx;
+            double pflen = sqrt(pfx*pfx + pfy*pfy + pfz*pfz);
+            pfx /= pflen; pfy /= pflen; pfz /= pflen;
+
+            // Transmitted E inside crystal
+            double Eys = sy, Eyp = piy_;
+            double EinY_x = Ts_entry*Eys*sx + Tp_entry*Eyp*pfx;
+            double EinY_y = Ts_entry*Eys*sy + Tp_entry*Eyp*pfy;
+            double EinY_z = Ts_entry*Eys*sz + Tp_entry*Eyp*pfz;
+
+            double Exs = -sx, Exp_ = -pix_;
+            double EinX_x = Ts_entry*Exs*sx + Tp_entry*Exp_*pfx;
+            double EinX_y = Ts_entry*Exs*sy + Tp_entry*Exp_*pfy;
+            double EinX_z = Ts_entry*Exs*sz + Tp_entry*Exp_*pfz;
+
+            // Exit s/p basis
+            double eox = -enx, eoy = -eny, eoz = -enz;
+            double sex = rdy*eoz - rdz*eoy;
+            double sey = rdz*eox - rdx*eoz;
+            double sez = rdx*eoy - rdy*eox;
+            double selen = sqrt(sex*sex + sey*sey + sez*sez);
+
+            if (selen < 1e-6)
+            {
+                double R = (fabs(Rs) + fabs(Rp)) * 0.5;
+                if (Rs > 0) R = R; else R = -R;
+                rEY_x = R * EinY_x; rEY_y = R * EinY_y; rEY_z = R * EinY_z;
+                rEX_x = R * EinX_x; rEX_y = R * EinX_y; rEX_z = R * EinX_z;
+            }
+            else
+            {
+                sex /= selen; sey /= selen; sez /= selen;
+                double peix = sey*rdz - sez*rdy;
+                double peiy = sez*rdx - sex*rdz;
+                double peiz = sex*rdy - sey*rdx;
+                double peilen = sqrt(peix*peix + peiy*peiy + peiz*peiz);
+                peix /= peilen; peiy /= peilen; peiz /= peilen;
+
+                double EinY_se = EinY_x*sex + EinY_y*sey + EinY_z*sez;
+                double EinY_pe = EinY_x*peix + EinY_y*peiy + EinY_z*peiz;
+                double EinX_se = EinX_x*sex + EinX_y*sey + EinX_z*sez;
+                double EinX_pe = EinX_x*peix + EinX_y*peiy + EinX_z*peiz;
+
+                double ErY_se = Rs * EinY_se;
+                double ErY_pe = Rp * EinY_pe;
+                double ErX_se = Rs * EinX_se;
+                double ErX_pe = Rp * EinX_pe;
+
+                double prex = sey*reflz - sez*refly;
+                double prey = sez*reflx - sex*reflz;
+                double prez = sex*refly - sey*reflx;
+                double prelen = sqrt(prex*prex + prey*prey + prez*prez);
+                prex /= prelen; prey /= prelen; prez /= prelen;
+
+                rEY_x = ErY_se*sex + ErY_pe*prex;
+                rEY_y = ErY_se*sey + ErY_pe*prey;
+                rEY_z = ErY_se*sez + ErY_pe*prez;
+                rEX_x = ErX_se*sex + ErX_pe*prex;
+                rEX_y = ErX_se*sey + ErX_pe*prey;
+                rEX_z = ErX_se*sez + ErX_pe*prez;
+            }
+        }
+
+        FacetRefl fr;
+        fr.entryId = f;
+        fr.exitId = exitId;
+        fr.reflDir = Point3f((float)reflx, (float)refly, (float)reflz);
+        fr.EY_x = rEY_x; fr.EY_y = rEY_y; fr.EY_z = rEY_z;
+        fr.EX_x = rEX_x; fr.EX_y = rEX_y; fr.EX_z = rEX_z;
+        double cx_ = (double)entry.center.cx;
+        double cy_ = (double)entry.center.cy;
+        double cz_ = (double)entry.center.cz;
+        fr.exitPt_x = cx_ + minT * rdx;
+        fr.exitPt_y = cy_ + minT * rdy;
+        fr.exitPt_z = cz_ + minT * rdz;
+        fr.phaseRef = FAR_ZONE_DISTANCE + ix*cx_ + iy*cy_ + iz*cz_ + re_n * minT;
+        fr.pathToExit = minT;
+        reflList.push_back(fr);
+
+        cout << "  Analytical refl: entry=" << f << " exit=" << exitId
+             << " nn_dot=" << nn_dot
+             << " Rs=" << Rs << " Rp=" << Rp
+             << " |E_Y|=" << sqrt(rEY_x*rEY_x + rEY_y*rEY_y + rEY_z*rEY_z)
+             << " reflDir=(" << reflx << "," << refly << "," << reflz << ")"
+             << endl;
+    }
+
+    cout << "Analytical reflections: " << reflList.size() << " facet pairs" << endl;
+
+    // Apply reflected PW to all assigned dipoles (no boundary/distance restrictions)
+    int nAdded = 0;
+    for (size_t i = 0; i < m_dipoles.size(); ++i)
+    {
+        DipoleField &dip = m_dipoles[i];
+        if (dip.assignedFacet < 0) continue;
+
+        const FacetRefl *fr = nullptr;
+        for (size_t ri = 0; ri < reflList.size(); ++ri)
+        {
+            if (reflList[ri].entryId == dip.assignedFacet)
+            {
+                fr = &reflList[ri];
+                break;
+            }
+        }
+        if (!fr) continue;
+
+        double t_refl = (double)fr->reflDir.cx * (dip.x - fr->exitPt_x)
+                       + (double)fr->reflDir.cy * (dip.y - fr->exitPt_y)
+                       + (double)fr->reflDir.cz * (dip.z - fr->exitPt_z);
+
+        double total_OP = fr->phaseRef + re_n * t_refl;
+        complex phase = exp_im(m_k * total_OP);
+
+        if (im_n > 1e-15)
+        {
+            double totalPath = fr->pathToExit + t_refl;
+            if (totalPath > 0)
+                phase = phase * exp(-m_k * im_n * totalPath);
+        }
+
+        dip.Ex_Y += fr->EY_x * phase;
+        dip.Ey_Y += fr->EY_y * phase;
+        dip.Ez_Y += fr->EY_z * phase;
+        dip.Ex_X += fr->EX_x * phase;
+        dip.Ey_X += fr->EX_y * phase;
+        dip.Ez_X += fr->EX_z * phase;
+        ++nAdded;
+    }
+
+    cout << "Analytical reflections applied to " << nAdded << " dipoles" << endl;
+}
+
 void ADDAFieldComputer::AddPerFacetReflection(const Point3f &incidentDir)
 {
     double re_n = real(m_ri);
@@ -1299,7 +1566,7 @@ void ADDAFieldComputer::AddPerFacetReflection(const Point3f &incidentDir)
 void ADDAFieldComputer::AccumulateReflectedBeams(
     const std::vector<InternalBeamSegment> &segments,
     const Point3f &incidentDir, double maxJonesNorm,
-    bool useDiffraction, double minFresnelNum)
+    bool useDiffraction, double minFresnelNum, double reflScale)
 {
     double re_n = real(m_ri);
     double im_n = imag(m_ri);
@@ -1612,7 +1879,7 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
                 continue;
 
             // Additive accumulation: reflected wave adds to direct wave
-            complex wPhase = kirchWeight * phase;
+            complex wPhase = kirchWeight * phase * reflScale;
 
             // Y-polarization: pure s-input -> (0, 1) in (p, s) basis
             complex Ep_Y = seg.J.m22 * wPhase;

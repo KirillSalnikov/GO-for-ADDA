@@ -98,9 +98,11 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("adda", 0, true); // ADDA mode: compute internal field and output for ADDA
     parser.AddRule("dpl", 1, true); // dipoles per wavelength for ADDA grid (default 10)
     parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
-    parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model instead of GO
+    parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model (anti-parallel only)
+    parser.AddRule("go", 0, true); // use GO-traced reflected beams instead of analytical
     parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for GO reflections
     parser.AddRule("nf", 1, true); // minimum Fresnel number for GO reflected beams (default 1.0)
+    parser.AddRule("rscale", 1, true); // amplitude scaling factor for GO reflected beams (default 1.0)
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -423,17 +425,20 @@ int main(int argc, const char* argv[])
             // Per-facet refracted plane waves with boundary smoothing
             addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction);
 
-            // Reflections: GO-traced nActs=1 beams (default), Fabry-Perot (--fp), or none (--norefl)
+            // Reflections: analytical PW (default), GO beams (--go), Fabry-Perot (--fp), none (--norefl)
             if (!args.IsCatched("norefl"))
             {
                 if (args.IsCatched("fp"))
                     addaField.AddPerFacetReflection(tracer.m_incidentLight.direction);
-                else
+                else if (args.IsCatched("go"))
                 {
                     double minNF = args.IsCatched("nf") ? args.GetDoubleValue("nf") : 1.0;
+                    double rScale = args.IsCatched("rscale") ? args.GetDoubleValue("rscale") : 1.0;
                     addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
-                                                       0.5, args.IsCatched("diffr"), minNF);
+                                                       0.5, args.IsCatched("diffr"), minNF, rScale);
                 }
+                else
+                    addaField.AddAnalyticalReflection(tracer.m_incidentLight.direction);
             }
 
             // Diagnose GO+PW field

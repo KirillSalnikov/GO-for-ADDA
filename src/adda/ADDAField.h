@@ -98,6 +98,11 @@ public:
 
     void IncrementSegCount() { ++m_segCount; }
 
+    /// Generalized analytical reflection: for each illuminated entry facet,
+    /// find first internal reflection facet (any angle), add reflected PW to all dipoles.
+    /// No anti-parallel restriction, no amplitude filter, no FP multi-bounce.
+    void AddAnalyticalReflection(const Point3f &incidentDir);
+
     /// Add per-facet first reflection (Fabry-Perot correction).
     /// For each dipole assigned to an entry facet, traces refracted beam to exit facet,
     /// computes Fresnel reflection, and adds reflected wave. No overlap.
@@ -110,7 +115,8 @@ public:
                                    const Point3f &incidentDir,
                                    double maxJonesNorm = 0.5,
                                    bool useDiffraction = false,
-                                   double minFresnelNum = 1.0);
+                                   double minFresnelNum = 1.0,
+                                   double reflScale = 1.0);
 
     /// Print contribution stats and compare GO field vs per-facet PW for covered dipoles
     void DiagnoseGOvsPW(const Point3f &incidentDir);

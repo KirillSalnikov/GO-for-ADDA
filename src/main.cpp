@@ -26,12 +26,42 @@ int bcount=0;
 using namespace std;
 using namespace chrono;
 
+/// Cube particle: 6 square facets, edge length specified
+class CubeParticle : public Particle
+{
+public:
+    CubeParticle(const complex &refrIndex, double edge)
+    {
+        isConcave = false;
+        double radius = edge / sqrt(2.0);
+        double halfH = edge / 2.0;
+        Init(6, refrIndex);
+        SetSymmetry(M_PI/2, M_PI/2);
+
+        // Set all facets to 4 vertices
+        for (int i = 0; i < 6; ++i)
+            defaultFacets[i].nVertices = 4;
+
+        Facet top = CreateBase(4, radius, halfH);
+        Facet bot = CreateBase(4, radius, -halfH);
+        defaultFacets[0] = top;
+        defaultFacets[5] = bot;
+        int iFacet = 0;
+        CreateSideFacets(top, bot, iFacet);
+
+        SetDefaultNormals();
+        Reset();
+        SetDefaultCenters();
+    }
+};
+
 enum class ParticleType : int
 {
     Hexagonal = 1,
     Bullet = 2,
     BulletRosette = 3,
     Droxtal = 4,
+    Cube = 5,
     ConcaveHexagonal = 10,
     TiltedHexagonal = 11,
     HexagonalAggregate = 12,
@@ -219,6 +249,10 @@ int main(int argc, const char* argv[])
         case ParticleType::Droxtal:
             sup = args.GetDoubleValue("p", 3);
             particle = new Droxtal(refrIndex, DegToRad(32.35), DegToRad(71.81), sup);
+            break;
+        case ParticleType::Cube:
+            height = args.GetDoubleValue("p", 1); // edge length
+            particle = new CubeParticle(refrIndex, height);
             break;
         case ParticleType::ConcaveHexagonal:
             height = args.GetDoubleValue("p", 1);

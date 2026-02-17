@@ -108,7 +108,8 @@ public:
     /// then to entry facet, computing OP = FAR_ZONE + incDir·P + n*(d1+d2).
     void AccumulateReflectedBeams(const std::vector<InternalBeamSegment> &segments,
                                    const Point3f &incidentDir,
-                                   double maxJonesNorm = 0.5);
+                                   double maxJonesNorm = 0.5,
+                                   bool useDiffraction = false);
 
     /// Print contribution stats and compare GO field vs per-facet PW for covered dipoles
     void DiagnoseGOvsPW(const Point3f &incidentDir);

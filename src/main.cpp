@@ -69,6 +69,7 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("dpl", 1, true); // dipoles per wavelength for ADDA grid (default 10)
     parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
     parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model instead of GO
+    parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for GO reflections
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -393,7 +394,8 @@ int main(int argc, const char* argv[])
                 if (args.IsCatched("fp"))
                     addaField.AddPerFacetReflection(tracer.m_incidentLight.direction);
                 else
-                    addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction);
+                    addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
+                                                       0.5, args.IsCatched("diffr"));
             }
 
             // Diagnose GO+PW field

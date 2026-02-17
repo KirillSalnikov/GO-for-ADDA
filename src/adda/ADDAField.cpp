@@ -47,25 +47,12 @@ static void FresnelCS(double x, double &outC, double &outS)
     if (x < 0) { outC = -outC; outS = -outS; }
 }
 
-/// Fresnel half-plane diffraction weight (complex)
-/// d = signed distance to edge (>0 illuminated, <0 shadow)
-/// z = propagation distance from aperture
-/// lambda_eff = wavelength in the medium
-static complex FresnelEdgeWeight(double d, double z, double lambda_eff)
-{
-    if (z < 1e-10) return complex(d > 0 ? 1.0 : 0.0, 0.0);
-    double w = d * sqrt(2.0 / (lambda_eff * z));
-    double C, S;
-    FresnelCS(w, C, S);
-    // U/U_0 = 0.5 + (1+i)/2 * (C - iS) = 0.5 + (C+S)/2 + i(C-S)/2
-    return complex(0.5 + (C + S) / 2.0, (C - S) / 2.0);
-}
-
 /// Kirchhoff diffraction weight from a polygon aperture.
 /// Uses Green's theorem to reduce the 2D Fresnel integral to 1D edge integrals:
 ///   ∫∫_poly exp(iπ(X²+Y²)/2) dXdY = ∮ Q(X,Y) dY
 /// where Q = exp(iπY²/2) · [(1+i)/2 + C(X) + iS(X)]
-/// Each edge is integrated with 8-point Gauss-Legendre quadrature.
+/// Adaptive composite 8-point Gauss-Legendre: each edge is subdivided into
+/// nSub = ceil(edgeMaxFresnel / 2) sub-intervals to resolve oscillations.
 /// Returns U/U₀ = (-i/2) · ∮ Q dY  (normalized to 1 for infinite aperture).
 static complex KirchhoffPolygonWeight(
     const double *poly_u, const double *poly_v, int nVert,
@@ -104,26 +91,37 @@ static complex KirchhoffPolygonWeight(
         if (fabs(dY) < 1e-15) continue;  // dY=0 → ∫Q dY = 0 (correct by Green's thm)
         double dX = X2 - X1;
 
+        // Adaptive subdivision: more sub-intervals for rapidly oscillating integrands
+        double edgeMaxF = fmax(fmax(fabs(X1), fabs(X2)), fmax(fabs(Y1), fabs(Y2)));
+        int nSub = (edgeMaxF > 2.0) ? (int)ceil(edgeMaxF / 2.0) : 1;
+
         complex edgeSum(0.0, 0.0);
-        for (int g = 0; g < NG; ++g)
+        for (int s = 0; s < nSub; ++s)
         {
-            double t = gp[g];
-            double X = X1 + t * dX;
-            double Y = Y1 + t * dY;
+            double t0 = (double)s / nSub;
+            double t1 = (double)(s + 1) / nSub;
+            double dt = t1 - t0;
 
-            double C, S;
-            FresnelCS(X, C, S);
+            for (int g = 0; g < NG; ++g)
+            {
+                double t = t0 + gp[g] * dt;
+                double X = X1 + t * dX;
+                double Y = Y1 + t * dY;
 
-            double piY2h = M_PI * Y * Y / 2.0;
-            double cosY = cos(piY2h), sinY = sin(piY2h);
+                double C, S;
+                FresnelCS(X, C, S);
 
-            // exp(iπY²/2) · [(1+i)/2 + C(X) + iS(X)]
-            double ar = 0.5 + C;
-            double ai = 0.5 + S;
-            double re = cosY * ar - sinY * ai;
-            double im = sinY * ar + cosY * ai;
+                double piY2h = M_PI * Y * Y / 2.0;
+                double cosY = cos(piY2h), sinY = sin(piY2h);
 
-            edgeSum += complex(re, im) * gw[g];
+                // exp(iπY²/2) · [(1+i)/2 + C(X) + iS(X)]
+                double ar = 0.5 + C;
+                double ai = 0.5 + S;
+                double re = cosY * ar - sinY * ai;
+                double im = sinY * ar + cosY * ai;
+
+                edgeSum += complex(re, im) * (gw[g] * dt);
+            }
         }
 
         result += edgeSum * dY;
@@ -1300,7 +1298,8 @@ void ADDAFieldComputer::AddPerFacetReflection(const Point3f &incidentDir)
 
 void ADDAFieldComputer::AccumulateReflectedBeams(
     const std::vector<InternalBeamSegment> &segments,
-    const Point3f &incidentDir, double maxJonesNorm)
+    const Point3f &incidentDir, double maxJonesNorm,
+    bool useDiffraction)
 {
     double re_n = real(m_ri);
     double im_n = imag(m_ri);
@@ -1373,12 +1372,12 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
         double lambda_eff = m_wavelength / re_n;
 
         // Back-project exit polygon to reflection facet B for Kirchhoff integral.
-        // 2D coordinates use e_perp/e_par (perpendicular to beam), NOT facet-plane axes.
+        // Only needed when diffraction weighting is enabled (--diffr flag).
         double polyB_u[MAX_VERTEX_NUM], polyB_v[MAX_VERTEX_NUM];
         double kb_ox = 0, kb_oy = 0, kb_oz = 0;
         bool kirchhoffReady = false;
 
-        if (seg.polyNVertices >= 3 && fabs(dDotN) > 1e-10)
+        if (useDiffraction && seg.polyNVertices >= 3 && fabs(dDotN) > 1e-10)
         {
             // Back-project first vertex to get origin on facet B
             double px0 = (double)seg.polyArr[0].cx;
@@ -1458,9 +1457,14 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
                            r.cy + seg.direction.cy * (float)t_exit,
                            r.cz + seg.direction.cz * (float)t_exit);
 
-            // Pre-filter uses 2D ray-casting (no normal dependency).
-            // Quick back-project dipole to facet B → get 2D coords → check containment.
-            if (kirchhoffReady && fabs(dDotN) > 1e-10)
+            // Containment check: with diffraction uses 2D ray-casting on back-projected polygon;
+            // without diffraction uses hard-cutoff IsInsidePolygon on exit polygon.
+            if (!kirchhoffReady)
+            {
+                if (!IsInsidePolygon(r_proj, seg.polyArr, seg.polyNVertices, polyNormal))
+                    continue;
+            }
+            else if (fabs(dDotN) > 1e-10)
             {
                 double dp_rn = dip.x*nBx + dip.y*nBy + dip.z*nBz + nBd;
                 double al = -dp_rn / dDotN;
@@ -1569,7 +1573,7 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
             }
 
             // Diffraction weight: Kirchhoff integral for narrow beams,
-            // product of half-planes for wide beams
+            // Kirchhoff diffraction weight (adaptive quadrature)
             complex kirchWeight(1.0, 0.0);
             if (kirchhoffReady)
             {
@@ -1578,41 +1582,10 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
                 double obs_v = Rdx*e_par.x  + Rdy*e_par.y  + Rdz*e_par.z;
 
                 double z_f = (dist_R_to_dip > 1e-10) ? dist_R_to_dip : 1e-10;
-                double scale_f = sqrt(2.0 / (lambda_eff * z_f));
 
-                // Max Fresnel-scaled distance from obs to polygon vertices
-                double maxFresnel = 0;
-                for (int vi = 0; vi < seg.polyNVertices; ++vi)
-                {
-                    double Xv = fabs((polyB_u[vi] - obs_u) * scale_f);
-                    double Yv = fabs((polyB_v[vi] - obs_v) * scale_f);
-                    if (Xv > maxFresnel) maxFresnel = Xv;
-                    if (Yv > maxFresnel) maxFresnel = Yv;
-                }
-
-                if (maxFresnel > 2.5)
-                {
-                    // Large Fresnel number: product of half-plane weights (accurate)
-                    kirchWeight = complex(1.0, 0.0);
-                    for (int ei = 0; ei < seg.polyNVertices; ++ei)
-                    {
-                        int ej = (ei + 1) % seg.polyNVertices;
-                        double eu = polyB_u[ej] - polyB_u[ei];
-                        double ev = polyB_v[ej] - polyB_v[ei];
-                        double elen = sqrt(eu*eu + ev*ev);
-                        if (elen < 1e-12) continue;
-                        double d_edge = ((obs_v - polyB_v[ei])*eu
-                                       - (obs_u - polyB_u[ei])*ev) / elen;
-                        kirchWeight = kirchWeight * FresnelEdgeWeight(d_edge, z_f, lambda_eff);
-                    }
-                }
-                else
-                {
-                    // Small Fresnel number: exact Kirchhoff integral
-                    kirchWeight = KirchhoffPolygonWeight(
-                        polyB_u, polyB_v, seg.polyNVertices,
-                        obs_u, obs_v, z_f, lambda_eff);
-                }
+                kirchWeight = KirchhoffPolygonWeight(
+                    polyB_u, polyB_v, seg.polyNVertices,
+                    obs_u, obs_v, z_f, lambda_eff);
             }
             if (norm(kirchWeight) < 1e-8)
                 continue;

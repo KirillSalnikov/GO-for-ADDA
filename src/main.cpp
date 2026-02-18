@@ -103,6 +103,8 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for GO reflections
     parser.AddRule("nf", 1, true); // minimum Fresnel number for GO reflected beams (default 1.0)
     parser.AddRule("rscale", 1, true); // amplitude scaling factor for GO reflected beams (default 1.0)
+    parser.AddRule("rmax", 1, true); // max |Rs|,|Rp| for analytical reflections (default 0.25)
+    parser.AddRule("noinit", 0, true); // skip field files, output only shape (for x_0=0 start)
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -438,16 +440,23 @@ int main(int argc, const char* argv[])
                                                        0.5, args.IsCatched("diffr"), minNF, rScale);
                 }
                 else
-                    addaField.AddAnalyticalReflection(tracer.m_incidentLight.direction);
+                {
+                    double rMax = args.IsCatched("rmax") ? args.GetDoubleValue("rmax") : 0.25;
+                    addaField.AddAnalyticalReflection(tracer.m_incidentLight.direction, rMax);
+                }
             }
 
             // Diagnose GO+PW field
             addaField.DiagnoseGOvsPW(tracer.m_incidentLight.direction);
 
             // Output ADDA files
+            bool noInit = args.IsCatched("noinit");
             addaField.WriteGeometryFile(dirName + "_shape.dat");
-            addaField.WriteFieldFileY(dirName + "_fieldY.dat");
-            addaField.WriteFieldFileX(dirName + "_fieldX.dat");
+            if (!noInit)
+            {
+                addaField.WriteFieldFileY(dirName + "_fieldY.dat");
+                addaField.WriteFieldFileX(dirName + "_fieldX.dat");
+            }
 
             // Clean up
             tracer.m_scattering->SetInternalSegmentStorage(nullptr);
@@ -456,10 +465,11 @@ int main(int argc, const char* argv[])
             cout << "  adda -shape read " << dirName << "_shape.dat"
                  << " -dpl " << dpl
                  << " -m " << re << " " << im
-                 << " -prop 0 0 -1"
-                 << " -init_field read " << dirName << "_fieldY.dat"
-                 << " " << dirName << "_fieldX.dat"
-                 << endl;
+                 << " -prop 0 0 -1";
+            if (!noInit)
+                cout << " -init_field read " << dirName << "_fieldY.dat"
+                     << " " << dirName << "_fieldX.dat";
+            cout << endl;
         }
         else
         {

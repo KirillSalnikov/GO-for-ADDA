@@ -938,7 +938,7 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir)
          << ", primary-facet fallback: " << fallbackFilled << endl;
 }
 
-void ADDAFieldComputer::AddAnalyticalReflection(const Point3f &incidentDir)
+void ADDAFieldComputer::AddAnalyticalReflection(const Point3f &incidentDir, double maxR)
 {
     double re_n = real(m_ri);
     double im_n = imag(m_ri);
@@ -1033,7 +1033,7 @@ void ADDAFieldComputer::AddAnalyticalReflection(const Point3f &incidentDir)
         double Rp = (cosI_exit - re_n*cosT_exit) / (cosI_exit + re_n*cosT_exit);
 
         // Skip large reflections — PW model error grows with |R|
-        if (fabs(Rs) > 0.25 || fabs(Rp) > 0.25) continue;
+        if (fabs(Rs) > maxR || fabs(Rp) > maxR) continue;
 
         // Reflected direction
         double reflx = rdx + 2.0*cosI_exit*enx;

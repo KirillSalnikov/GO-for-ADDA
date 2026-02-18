@@ -101,7 +101,7 @@ public:
     /// Generalized analytical reflection: for each illuminated entry facet,
     /// find first internal reflection facet (any angle), add reflected PW to all dipoles.
     /// No anti-parallel restriction, no amplitude filter, no FP multi-bounce.
-    void AddAnalyticalReflection(const Point3f &incidentDir);
+    void AddAnalyticalReflection(const Point3f &incidentDir, double maxR = 0.25);
 
     /// Add per-facet first reflection (Fabry-Perot correction).
     /// For each dipole assigned to an entry facet, traces refracted beam to exit facet,

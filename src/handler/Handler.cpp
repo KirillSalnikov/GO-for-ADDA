@@ -59,11 +59,6 @@ void Handler::WriteTotalMatricesToFile(const string &/*destName*/)
 
 }
 
-void Handler::SetNormIndex(double value)
-{
-    m_normIndex = value;
-}
-
 void Handler::SetSinZenith(double value)
 {
     m_sinZenith = value;

@@ -20,7 +20,8 @@ Binary: `bin/mbs`
           -w 0.532 --grid 0 180 1 1
 # UV-sphere D=50 µm, absorbing particle (m = 1.5 + 0.01i)
 ./bin/mbs -p 6 50 20 20 --ri 1.5 0.01 -n 10 --fixed 0 0 \
-          -w 0.532 --grid 0 180 1 1```
+          -w 0.532 --grid 0 180 1 1
+```
 
 ## Command-Line Reference
 
@@ -32,7 +33,7 @@ Binary: `bin/mbs`
 | `--ri RE IM` | Complex refractive index (real and imaginary parts) |
 | `-n N` | Number of internal reflections |
 | `--grid ...` | Scattering angle grid (see below) |
-| `--fixed β γ` or `--random Nβ Nγ` | Orientation: fixed (degrees) or random averaging |
+| `--fixed β γ` | Particle orientation: zenith and azimuth angles (degrees) |
 
 ### Optional
 
@@ -41,7 +42,6 @@ Binary: `bin/mbs`
 | `-w λ` | Wavelength in µm (required for `--adda`) |
 | `-o NAME` | Output file/directory prefix (default: `M`) |
 | `-r RATIO` | Beam area restriction ratio for splitting (default: 100) |
-| `--log SEC` | Progress output interval in seconds |
 | `--forced_convex` | Force convex particle tracing |
 | `--forced_nonconvex` | Force non-convex particle tracing |
 | `--tr FILE` | Compute only trajectories listed in file |

@@ -24,7 +24,6 @@ int bcount=0;
 #endif
 
 using namespace std;
-using namespace chrono;
 
 /// Cube particle: 6 square facets, edge length specified
 class CubeParticle : public Particle
@@ -159,7 +158,6 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("pf", zero, true); // particle (filename)
     parser.AddRule("rs", 1, true, "pf"); // resize particle (new size)
     parser.AddRule("fixed", 2, true); // fixed orientarion (beta, gamma)
-    parser.AddRule("random", 2, true); // random orientarion (beta number, gamma number)
     parser.AddRule("w", 1, true); // wavelength
     parser.AddRule("grid", '+', true); /* backscattering grid:
  (radius, Nphi, Ntheta) when 3 parameters
@@ -172,7 +170,6 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("forced_nonconvex", zero, true);
     parser.AddRule("forced_convex", zero, true);
     parser.AddRule("r", 1, true); // restriction ratio for small beams when intersection (100 by default)
-    parser.AddRule("log", 1, true); // time of writing progress (in seconds)
     parser.AddRule("adda", 0, true); // ADDA mode: compute internal field and output for ADDA
     parser.AddRule("dpl", 1, true); // dipoles per wavelength for ADDA grid (default 10)
     parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
@@ -216,33 +213,6 @@ ScatteringRange SetConus(ArgPP &parser)
         std::cerr << "ERROR!!!!!!! Wrong \"grid\" argument number";
         exit(1);
     }
-}
-
-AngleRange GetRange(const ArgPP &parser, const std::string &key,
-                    Particle *particle)
-{
-    int number;
-    double min, max;
-
-    if (key == "b")
-    {
-        number = parser.GetIntValue("random", 0);
-        min = 0;
-        max = particle->GetSymmetry().beta;
-    }
-    else if (key == "g")
-    {
-        number = parser.GetIntValue("random", 1);
-        min = 0;
-        max = particle->GetSymmetry().gamma;
-    }
-    else
-    {
-        cerr << "Error! " << __FUNCTION__;
-        throw std::exception();
-    }
-
-    return AngleRange(min, max, number);
 }
 
 int main(int argc, const char* argv[])
@@ -449,18 +419,10 @@ int main(int argc, const char* argv[])
 
     bool addaMode = args.IsCatched("adda");
 
-    if (addaMode)
+    if (addaMode && (!args.IsCatched("w") || wave < 1e-15))
     {
-        if (!args.IsCatched("fixed"))
-        {
-            cerr << "ERROR: -adda requires -fixed orientation" << endl;
-            exit(1);
-        }
-        if (!args.IsCatched("w") || wave < 1e-15)
-        {
-            cerr << "ERROR: -adda requires -w (wavelength)" << endl;
-            exit(1);
-        }
+        cerr << "ERROR: -adda requires -w (wavelength)" << endl;
+        exit(1);
     }
 
     if (args.IsCatched("fixed"))
@@ -544,21 +506,6 @@ int main(int argc, const char* argv[])
         {
             tracer.TraceFixed(beta, gamma);
         }
-    }
-    else if (args.IsCatched("random"))
-    {
-        if (addaMode)
-        {
-            cerr << "ERROR: -adda only works with -fixed orientation" << endl;
-            exit(1);
-        }
-        additionalSummary += ", random orientation, ";
-        AngleRange beta = GetRange(args, "b", particle);
-        AngleRange gamma = GetRange(args, "g", particle);
-        additionalSummary += "grid: " + to_string(beta.number) + "x" + to_string(gamma.number) + "\n\n";
-        cout << additionalSummary;
-        tracer.m_summary = additionalSummary;
-        tracer.TraceRandom(beta, gamma);
     }
 
     delete handler;

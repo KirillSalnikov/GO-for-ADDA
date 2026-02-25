@@ -246,7 +246,6 @@ public:
     void SetAbsorptionAccounting(bool value);
     virtual void SetScatteringSphere(const ScatteringRange &grid);
 
-    void SetNormIndex(double value);
     void SetSinZenith(double value);
 
     Light *m_incidentLight;

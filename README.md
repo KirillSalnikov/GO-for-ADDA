@@ -4,11 +4,9 @@ Geometrical Optics (GO) light scattering by faceted particles. Computes Mueller 
 
 ## Build
 
-Requires: `g++`, `make`, `qt5-qmake` (or `qmake-qt5`), `libqt5gui5`
+Requires: `g++`, `make`
 
 ```bash
-cd pro
-qmake MBS-GO.pro   # or qmake-qt5 MBS-GO.pro
 make -j$(nproc)
 ```
 

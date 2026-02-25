@@ -84,7 +84,7 @@ Generate initial field approximation for [ADDA](https://github.com/adda-code/add
 ```bash
 # Step 1: MBS-GO generates shape + field files
 ./bin/mbs -p 1 20 10 --ri 1.3116 0 -n 10 --fixed 0 0 \
-          -w 0.532 --grid 0 180 1 1 --adda --dpl 10 --close -o test
+          -w 0.532 --grid 0 180 1 1 --adda --dpl 10 -o test
 
 # Step 2: ADDA uses them as initial field
 adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \

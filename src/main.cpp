@@ -168,7 +168,7 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("all", 0, true); // calculate all trajectories
     parser.AddRule("close", 0, true); // closing of program after calculation
     parser.AddRule("o", 1, true); // output folder name
-    parser.AddRule("gr", zero, true);
+
 
     parser.AddRule("forced_nonconvex", zero, true);
     parser.AddRule("forced_convex", zero, true);
@@ -399,7 +399,6 @@ int main(int argc, const char* argv[])
         }
     }
 
-    bool isOutputGroups = args.IsCatched("gr");
     double wave = args.IsCatched("w") ? args.GetDoubleValue("w") : 0;
     additionalSummary += "Wavelength (um): " + to_string(wave) + "\n";
 
@@ -418,7 +417,6 @@ int main(int argc, const char* argv[])
         string trackFileName = args.GetStringValue("tr");
         trackGroups.ImportTracks(particle->nFacets, trackFileName);
         trackGroups.shouldComputeTracksOnly = !args.IsCatched("all");
-        trackGroups.shouldOutputGroups = args.IsCatched("gr");
     }
 
     int nTheta = args.GetDoubleValue("grid", 2);
@@ -432,8 +430,6 @@ int main(int argc, const char* argv[])
         tracer.m_scattering->restriction = args.GetDoubleValue("r", 0);
     }
     tracer.m_summary = additionalSummary;
-    tracer.SetIsOutputGroups(isOutputGroups);
-
     HandlerGO *handler;
 
     if (args.IsCatched("tr"))

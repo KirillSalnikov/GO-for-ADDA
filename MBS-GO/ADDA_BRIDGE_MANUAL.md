@@ -1,21 +1,6 @@
----
-title: "MBS-GO → ADDA Bridge: Initial Field for DDA Solver"
-author: "MBS-GO Project"
-date: "February 2026"
-geometry: margin=2.5cm
-fontsize: 11pt
-lang: ru
-babel-lang: russian
-mainfont: "DejaVu Serif"
-monofont: "DejaVu Sans Mono"
-header-includes:
-  - \usepackage{booktabs}
-  - \usepackage{longtable}
-  - \usepackage{float}
-  - \floatplacement{table}{H}
----
+# MBS-GO → ADDA Bridge: Initial Field for DDA Solver
 
-# 1. Overview
+## 1. Overview
 
 The MBS-GO → ADDA bridge computes an initial approximation of the internal electromagnetic field inside a crystal particle using Geometrical Optics (GO), and passes it to the ADDA DDA solver via `-init_field read`. This reduces the initial residual norm (RE_000).
 
@@ -99,39 +84,33 @@ adda -shape read M_shape.dat -dpl 10 \
 
 The method assigns each internal dipole to one illuminated entry facet and fills it with a refracted plane wave:
 
-**Step 1.** For each illuminated facet $f$ (where $\cos\theta_i = \hat{k}_{inc} \cdot \hat{n}_{in} > 0$):
+**Step 1.** For each illuminated facet f (where cosθ_i = k_inc · n_in > 0):
 
-- Compute refracted direction via Snell's law:
-$$\hat{k}_{refr} = \eta\,\hat{k}_{inc} + C\,\hat{n}$$
-where $\eta = 1/n$, $C = \cos\theta_t - \eta\cos\theta_i$
+- Compute refracted direction via Snell's law: k_refr = η·k_inc + C·n, where η = 1/n, C = cosθ_t − η·cosθ_i
 
-- Compute complex Snell/Fresnel: $\gamma = \sqrt{m^2 - \sin^2\theta_i}$, then
-$$T_s = \frac{2\cos\theta_i}{\cos\theta_i + \gamma}, \quad
-  T_p = \frac{2m\cos\theta_i}{m^2\cos\theta_i + \gamma}$$
+- Compute complex Snell/Fresnel: γ = sqrt(m² − sin²θ_i), then Ts = 2cosθ_i / (cosθ_i + γ), Tp = 2m·cosθ_i / (m²cosθ_i + γ)
 
-- Decompose incident polarization into s/p components and compute refracted E-field amplitude (complex for absorbing $m$)
+- Decompose incident polarization into s/p components and compute refracted E-field amplitude (complex for absorbing m)
 
-**Step 2.** For each dipole at position $\vec{r}$:
+**Step 2.** For each dipole at position r:
 
-- Back-project along $-\hat{k}_{refr}$ to the facet plane
+- Back-project along −k_refr to the facet plane
 - Check if projection falls inside the facet polygon
-- If yes: assign to this facet, compute field with complex phase:
-$$\vec{E}(\vec{r}) = \vec{A}_f \cdot \exp\!\left[ik\left(\hat{k}_{inc} \cdot \Delta\vec{r}_{inc} + (\gamma - \cos\theta_i)(\hat{n}\cdot\Delta\vec{r})\right)\right]$$
-where $\Delta\vec{r} = \vec{r} - \vec{r}_{ref}$. For absorbing $m$, $\operatorname{Im}(\gamma) > 0$ provides exponential decay along the facet normal.
-- If no facet matches: fallback to the primary facet (largest $\cos\theta_i$)
+- If yes: assign to this facet, compute field with complex phase: E(r) = A_f · exp[ik(k_inc · Δr_inc + (γ − cosθ_i)(n · Δr))], where Δr = r − r_ref. For absorbing m, Im(γ) > 0 provides exponential decay along the facet normal.
+- If no facet matches: fallback to the primary facet (largest cosθ_i)
 
 ## 3.2 Key Properties
 
 - **No overlap**: each dipole is assigned to exactly one facet via back-projection
 - **Correct Fresnel**: s and p transmission coefficients applied separately
 - **Size-independent**: RE_000 does not depend on `dpl` (confirmed for dpl=10 and dpl=20)
-- **Phase-consistent**: uses $\hat{k}_{inc} \cdot \vec{r}$ for external path, $n\,\hat{k}_{refr}\cdot\Delta\vec{r}$ for internal path
+- **Phase-consistent**: uses k_inc · r for external path, n·k_refr · Δr for internal path
 
 # 4. GO-traced Reflected Beams (Default)
 
 ## 4.1 Method
 
-By default, the bridge uses GO-traced beam segments captured during ray tracing. These segments carry full Jones matrices from complex Fresnel reflections/transmissions along the beam path. For absorbing particles ($\operatorname{Im}(m) > 0$), the Fresnel coefficients use complex Snell's law ($\cos\theta_t = \sqrt{1 - m^2\sin^2\theta_i}$) and absorption is applied as $\exp(-k\,\kappa\,d)$ along internal paths.
+By default, the bridge uses GO-traced beam segments captured during ray tracing. These segments carry full Jones matrices from complex Fresnel reflections/transmissions along the beam path. For absorbing particles (Im(m) > 0), the Fresnel coefficients use complex Snell's law (cosθ_t = sqrt(1 − m²sin²θ_i)) and absorption is applied as exp(−k·κ·d) along internal paths.
 
 For each reflected beam segment:
 
@@ -157,9 +136,9 @@ The philosophy is **minimal filtering by default** — all GO-traced beams are i
 The `--fp` flag activates a simplified analytical reflection model:
 
 - For each illuminated entry facet, trace refracted ray to the nearest exit facet
-- Requires entry and exit normals to be anti-parallel ($\hat{n}_{entry} \cdot \hat{n}_{exit} < -0.95$)
-- Skips TIR cases and large reflections ($|R_s| > 0.25$ or $|R_p| > 0.25$)
-- Applies Fabry-Perot multi-bounce factor: $F = 1/(1 - R^2_{avg}\,e^{2iknd})$
+- Requires entry and exit normals to be anti-parallel (n_entry · n_exit < −0.95)
+- Skips TIR cases and large reflections (|Rs| > 0.25 or |Rp| > 0.25)
+- Applies Fabry-Perot multi-bounce factor: F = 1/(1 − R²_avg · exp(2iknd))
 
 This mode is conservative and only helps for nearly anti-parallel facet pairs (e.g., basal faces of hexagonal columns at normal incidence).
 
@@ -167,9 +146,9 @@ This mode is conservative and only helps for nearly anti-parallel facet pairs (e
 
 ## 5.1 RE_000 vs Incidence Angle (Hexagonal Column)
 
-$n = 1.3116$, $\lambda = 0.532\,\mu$m, dpl=10.
+n = 1.3116, λ = 0.532 µm, dpl=10.
 
-| Angle $\beta$ | 10x5 $\mu$m (Y/X) | 20x10 $\mu$m (Y/X) |
+| Angle β | 10x5 µm (Y/X) | 20x10 µm (Y/X) |
 |:-:|:-:|:-:|
 | 0° | 0.427 / 0.426 | 0.357 / 0.356 |
 | 10° | 0.383 / 0.377 | --- |
@@ -178,7 +157,7 @@ $n = 1.3116$, $\lambda = 0.532\,\mu$m, dpl=10.
 | 45° | 0.375 / 0.328 | --- |
 | 60° | 0.402 / 0.358 | 0.304 / 0.311 |
 
-RE_000 improves with particle size: at 20x10 $\mu$m ($\sim 40\lambda$) it reaches 0.27--0.36 (64--73% better than zero). GO approximation becomes more accurate as the size parameter grows.
+RE_000 improves with particle size: at 20x10 µm (~40λ) it reaches 0.27–0.36 (64–73% better than zero). GO approximation becomes more accurate as the size parameter grows.
 
 ## 5.2 Comparison of Methods (Hex Column, 30°)
 
@@ -192,7 +171,7 @@ RE_000 improves with particle size: at 20x10 $\mu$m ($\sim 40\lambda$) it reache
 
 ## 5.3 Different Particle Shapes
 
-All particles: $n = 1.3116$, $\lambda = 0.532\,\mu$m, dpl=10.
+All particles: n = 1.3116, λ = 0.532 µm, dpl=10.
 
 | Particle | Angle | RE_000 Y/X | Notes |
 |----------|:-----:|:----------:|-------|
@@ -217,11 +196,11 @@ RE_000 depends on physical particle size but NOT on grid resolution (dpl):
 
 | Particle | dpl | Dipoles | RE_000 Y/X (30°) |
 |----------|:---:|:-------:|:-:|
-| 10x5 $\mu$m | 10 | 1.08M | 0.374 / 0.336 |
-| 10x5 $\mu$m | 20 | 8.64M | 0.375 / 0.336 |
-| 20x10 $\mu$m | 10 | 8.64M | 0.317 / 0.274 |
+| 10x5 µm | 10 | 1.08M | 0.374 / 0.336 |
+| 10x5 µm | 20 | 8.64M | 0.375 / 0.336 |
+| 20x10 µm | 10 | 8.64M | 0.317 / 0.274 |
 
-Doubling the particle size (at fixed dpl) improves RE_000 by $\sim 0.06$. Doubling dpl (at fixed size) does not change RE_000. The improvement with size confirms that GO becomes more accurate at larger size parameters.
+Doubling the particle size (at fixed dpl) improves RE_000 by ~0.06. Doubling dpl (at fixed size) does not change RE_000. The improvement with size confirms that GO becomes more accurate at larger size parameters.
 
 # 6. Approaches Tested and Rejected
 
@@ -230,9 +209,9 @@ Doubling the particle size (at fixed dpl) improves RE_000 by $\sim 0.06$. Doubli
 Attempted to smooth entry facet boundaries using Kirchhoff polygon aperture weighting (`KirchhoffPolygonWeight`). Two variants tested:
 
 - **Multi-facet coherent sum**: each dipole receives weighted contributions from ALL facets. Result: destructive interference, RE_000 = 2.1 (much worse than baseline).
-- **Single-facet smoothing**: each dipole assigned to one facet, but with Fresnel edge smoothing instead of binary in/out. Result: RE_000 = 2.1 again — Fresnel scale $\sqrt{\lambda_{eff} \cdot z_{prop}}$ was comparable to facet size, corrupting plane-wave phase structure.
+- **Single-facet smoothing**: each dipole assigned to one facet, but with Fresnel edge smoothing instead of binary in/out. Result: RE_000 = 2.1 again — Fresnel scale sqrt(λ_eff · z_prop) was comparable to facet size, corrupting plane-wave phase structure.
 
-**Conclusion**: Kirchhoff edge diffraction is unsuitable for facets with size $\lesssim 10\lambda$.
+**Conclusion**: Kirchhoff edge diffraction is unsuitable for facets with size < ~10λ.
 
 ## 6.2 Alternative Phase Models
 
@@ -246,7 +225,7 @@ Attempted to smooth entry facet boundaries using Kirchhoff polygon aperture weig
 
 ## 6.3 Iteration Count
 
-GO initial field does **not** reduce ADDA iteration count for QMR solver (the default). The system matrix condition number depends on particle shape and refractive index, not on the initial field. BiCGStab solver shows ~3.5% fewer iterations at $m \geq 1.5$, but not for ice ($n = 1.3116$).
+GO initial field does **not** reduce ADDA iteration count for QMR solver (the default). The system matrix condition number depends on particle shape and refractive index, not on the initial field. BiCGStab solver shows ~3.5% fewer iterations at m >= 1.5, but not for ice (n = 1.3116).
 
 # 7. Code Details
 
@@ -284,25 +263,25 @@ GO initial field does **not** reduce ADDA iteration count for QMR solver (the de
 
 ## 7.4 Coordinate System
 
-- Particle is **rotated** by $(\beta, \gamma, 0)$ before GO tracing
+- Particle is **rotated** by (β, γ, 0) before GO tracing
 - ADDA uses fixed propagation direction `prop = (0, 0, -1)`
 - All field coordinates are in the rotated particle frame
 
 ## 7.5 Phase Convention
 
-$$\phi = k\left[\hat{k}_{inc}\cdot\Delta\vec{r}_{inc} + \left(\gamma - \cos\theta_i\right)\left(\hat{n}\cdot\Delta\vec{r}\right)\right]$$
+φ = k · [k_inc · Δr_inc + (γ − cosθ_i)(n · Δr)]
 
-where $\gamma = \sqrt{m^2 - \sin^2\theta_i}$ (complex for absorbing $m$), $\hat{n}$ is the inward facet normal, and $\Delta\vec{r} = \vec{r} - \vec{r}_{ref}$. For transparent $m$, this reduces to $\hat{k}_{inc}\cdot\vec{r}_{proj} + n\,\hat{k}_{refr}\cdot(\vec{r} - \vec{r}_{proj})$. For absorbing $m$, $\operatorname{Im}(\gamma)$ provides natural amplitude decay along the facet normal direction.
+where γ = sqrt(m² − sin²θ_i) (complex for absorbing m), n is the inward facet normal, and Δr = r − r_ref. For transparent m, this reduces to k_inc · r_proj + n · k_refr · (r − r_proj). For absorbing m, Im(γ) provides natural amplitude decay along the facet normal direction.
 
 # 8. Known Issues and Bugs Fixed
 
-1. **Snell's law sign bug** (fixed): was $C = \eta\cos\theta_i - \cos\theta_t$, corrected to $C = \cos\theta_t - \eta\cos\theta_i$
+1. **Snell's law sign bug** (fixed): was C = η·cosθ_i − cosθ_t, corrected to C = cosθ_t − η·cosθ_i
 
 2. **E_par sign bug** (fixed): `e_par = cross(d, e_perp)` gives correct right-handed basis
 
-3. **X-pol sign bug** (fixed): X-pol input is $(0, -1)$ in $(e_\perp, e_\parallel)$ basis, requiring sign flip
+3. **X-pol sign bug** (fixed): X-pol input is (0, −1) in (e_perp, e_par) basis, requiring sign flip
 
-4. **Jones matrix s/p swap** (fixed): `AccumulateBeamContribution` had input columns swapped --- Y-pol (pure s-input) was using Column 1 (p-input) instead of Column 2. Fix: Y-pol uses `(J.m22, J.m12)` = (s $\to$ s, s $\to$ p), X-pol uses `(-J.m21, -J.m11)` = (-(p $\to$ s), -(p $\to$ p)). At normal incidence this caused $r_p$ (negative) to be applied instead of $r_s$ (positive), making reflected beams subtract instead of add.
+4. **Jones matrix s/p swap** (fixed): `AccumulateBeamContribution` had input columns swapped — Y-pol (pure s-input) was using Column 1 (p-input) instead of Column 2. Fix: Y-pol uses `(J.m22, J.m12)` = (s→s, s→p), X-pol uses `(-J.m21, -J.m11)` = (-(p→s), -(p→p)). At normal incidence this caused r_p (negative) to be applied instead of r_s (positive), making reflected beams subtract instead of add.
 
 5. **GO beam overlap** (fundamental limitation): exit-polygon containment doesn't partition the interior --- multiple segments cover the same dipoles. Mitigated by using per-facet PW for the direct refracted wave and GO beams only for reflections.
 
@@ -310,6 +289,6 @@ where $\gamma = \sqrt{m^2 - \sin^2\theta_i}$ (complex for absorbing $m$), $\hat{
 
 # 9. Future Directions
 
-- Test at larger size parameters (dpl $\geq$ 50) where GO approximation improves
+- Test at larger size parameters (dpl >= 50) where GO approximation improves
 - Implement Voronoi-like beam partitioning to eliminate reflected beam overlap
 - Investigate boundary smoothing methods that preserve plane-wave phase structure

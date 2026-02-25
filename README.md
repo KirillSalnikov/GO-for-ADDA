@@ -15,12 +15,12 @@ Binary: `bin/mbs`
 ## Quick Start
 
 ```bash
-# Hex column H=20 D=10 µm, ice, 10 reflections, backscattering
+# Hex column H=20 D=10 µm, ice, 10 reflections
 ./bin/mbs -p 1 20 10 --ri 1.3116 0 -n 10 --fixed 0 0 \
           -w 0.532 --grid 0 180 1 1 --close
 
-# Random orientation average (100x100 grid)
-./bin/mbs -p 1 20 10 --ri 1.3116 0 -n 10 --random 100 100 \
+# UV-sphere D=50 µm, absorbing particle (m = 1.5 + 0.01i)
+./bin/mbs -p 6 50 20 20 --ri 1.5 0.01 -n 10 --fixed 0 0 \
           -w 0.532 --grid 0 180 1 1 --close
 ```
 
@@ -59,9 +59,16 @@ Binary: `bin/mbs`
 | 3 | `-p 3 H D [S]` | Bullet rosette |
 | 4 | `-p 4 _ _ S` | Droxtal |
 | 5 | `-p 5 L` | Cube (edge length L in µm) |
+| 6 | `-p 6 D nLat nLon` | UV-sphere (diameter D, latitude × longitude tessellation) |
 | 10 | `-p 10 H D C` | Concave hexagonal (cavity depth C) |
 | 11 | `-p 11 H D` | Tilted hexagonal |
 | 12 | `-p 12 H D N` | Hexagonal aggregate (N elements) |
+
+### Refractive Index (`--ri`)
+
+`--ri RE IM` — complex refractive index m = RE + i·IM. Both parts are always used: RE controls refraction (Snell's law), IM controls absorption (exponential decay along internal paths). Fresnel coefficients use full complex Snell's law.
+
+Examples: `--ri 1.3116 0` (ice, transparent), `--ri 1.5 0.01` (absorbing glass), `--ri 1.3 0.1` (strongly absorbing).
 
 ### Scattering Grid (`--grid`)
 

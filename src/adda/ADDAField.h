@@ -83,7 +83,9 @@ public:
 
     /// Fill uncovered dipoles with per-facet refracted plane waves.
     /// Each illuminated facet gets its own Snell refraction + Fresnel coefficients.
-    void FillUncoveredPerFacet(const Point3f &incidentDir);
+    /// useWKB: phase propagates along incDir (not refracted dir) inside medium.
+    void FillUncoveredPerFacet(const Point3f &incidentDir,
+                                bool useWKB = false);
 
     /// Apply a uniform refracted plane wave to ALL dipoles (for non-convex).
     /// Uses the given refracted direction with z_max-based phase and
@@ -108,15 +110,17 @@ public:
     /// computes Fresnel reflection, and adds reflected wave. No overlap.
     void AddPerFacetReflection(const Point3f &incidentDir);
 
-    /// Accumulate E-field from GO-traced nActs=1 reflected beam segments.
+    /// Accumulate E-field from GO-traced reflected beam segments.
     /// Uses per-dipole phase: back-projects each dipole to reflection facet,
-    /// then to entry facet, computing OP = FAR_ZONE + incDir·P + n*(d1+d2).
+    /// then to entry facet, computing OP = incDir·P + n*(d1+d2).
     void AccumulateReflectedBeams(const std::vector<InternalBeamSegment> &segments,
                                    const Point3f &incidentDir,
                                    double maxJonesNorm = 0.5,
                                    bool useDiffraction = false,
                                    double minFresnelNum = 1.0,
-                                   double reflScale = 1.0);
+                                   double reflScale = 1.0,
+                                   int maxNActs = 1,
+                                   bool incoherent = false);
 
     /// Print contribution stats and compare GO field vs per-facet PW for covered dipoles
     void DiagnoseGOvsPW(const Point3f &incidentDir);

@@ -55,6 +55,85 @@ public:
     }
 };
 
+/// Sphere particle: UV-sphere tessellation
+/// Usage: -p 6 D [nLat [nLon]]  (diameter, latitude divisions, longitude divisions)
+class SphereParticle : public Particle
+{
+public:
+    SphereParticle(const complex &refrIndex, double diameter,
+                   int nLat = 10, int nLon = 20)
+    {
+        isConcave = false;
+        double R = diameter / 2.0;
+
+        int totalFacets = 2 * nLon + (nLat - 2) * nLon;
+        if (totalFacets > MAX_FACET_NUM)
+        {
+            cerr << "ERROR: Sphere needs " << totalFacets
+                 << " facets, max is " << MAX_FACET_NUM << endl;
+            exit(1);
+        }
+
+        Init(totalFacets, refrIndex);
+        SetSymmetry(M_PI, M_PI);
+
+        // Latitude and longitude angles
+        std::vector<double> theta(nLat + 1), phi(nLon + 1);
+        for (int i = 0; i <= nLat; ++i)
+            theta[i] = M_PI * i / nLat;
+        for (int j = 0; j <= nLon; ++j)
+            phi[j] = 2.0 * M_PI * j / nLon;
+
+        auto sp = [R](double th, double ph) -> Point3f {
+            return Point3f((float)(R * sin(th) * cos(ph)),
+                           (float)(R * sin(th) * sin(ph)),
+                           (float)(R * cos(th)));
+        };
+
+        int fi = 0;
+        Point3f northPole(0, 0, (float)R);
+        Point3f southPole(0, 0, (float)(-R));
+
+        // Top cap triangles (CCW from outside → outward normal)
+        for (int j = 0; j < nLon; ++j)
+        {
+            defaultFacets[fi].nVertices = 3;
+            defaultFacets[fi].arr[0] = northPole;
+            defaultFacets[fi].arr[1] = sp(theta[1], phi[j]);
+            defaultFacets[fi].arr[2] = sp(theta[1], phi[j + 1]);
+            ++fi;
+        }
+
+        // Middle quads: (θi,φj) → (θi+1,φj) → (θi+1,φj+1) → (θi,φj+1)
+        for (int i = 1; i < nLat - 1; ++i)
+        {
+            for (int j = 0; j < nLon; ++j)
+            {
+                defaultFacets[fi].nVertices = 4;
+                defaultFacets[fi].arr[0] = sp(theta[i],   phi[j]);
+                defaultFacets[fi].arr[1] = sp(theta[i+1], phi[j]);
+                defaultFacets[fi].arr[2] = sp(theta[i+1], phi[j+1]);
+                defaultFacets[fi].arr[3] = sp(theta[i],   phi[j+1]);
+                ++fi;
+            }
+        }
+
+        // Bottom cap triangles (CCW from outside → outward normal)
+        for (int j = 0; j < nLon; ++j)
+        {
+            defaultFacets[fi].nVertices = 3;
+            defaultFacets[fi].arr[0] = southPole;
+            defaultFacets[fi].arr[1] = sp(theta[nLat - 1], phi[j + 1]);
+            defaultFacets[fi].arr[2] = sp(theta[nLat - 1], phi[j]);
+            ++fi;
+        }
+
+        SetDefaultNormals();
+        Reset();
+        SetDefaultCenters();
+    }
+};
+
 enum class ParticleType : int
 {
     Hexagonal = 1,
@@ -62,6 +141,7 @@ enum class ParticleType : int
     BulletRosette = 3,
     Droxtal = 4,
     Cube = 5,
+    Sphere = 6,
     ConcaveHexagonal = 10,
     TiltedHexagonal = 11,
     HexagonalAggregate = 12,
@@ -90,7 +170,7 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("close", 0, true); // closing of program after calculation
     parser.AddRule("o", 1, true); // output folder name
     parser.AddRule("gr", zero, true);
-    parser.AddRule("incoh", zero, true);
+
     parser.AddRule("forced_nonconvex", zero, true);
     parser.AddRule("forced_convex", zero, true);
     parser.AddRule("r", 1, true); // restriction ratio for small beams when intersection (100 by default)
@@ -99,12 +179,14 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("dpl", 1, true); // dipoles per wavelength for ADDA grid (default 10)
     parser.AddRule("norefl", 0, true); // skip all reflections in ADDA mode
     parser.AddRule("fp", 0, true); // use old Fabry-Perot reflection model (anti-parallel only)
-    parser.AddRule("go", 0, true); // use GO-traced reflected beams instead of analytical
-    parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for GO reflections
-    parser.AddRule("nf", 1, true); // minimum Fresnel number for GO reflected beams (default 1.0)
-    parser.AddRule("rscale", 1, true); // amplitude scaling factor for GO reflected beams (default 1.0)
-    parser.AddRule("rmax", 1, true); // max |Rs|,|Rp| for analytical reflections (default 0.25)
+    parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for reflected beams
+    parser.AddRule("nf", 1, true); // minimum Fresnel number for reflected beams (default 1.0)
+    parser.AddRule("rscale", 1, true); // amplitude scaling factor for reflected beams (default 1.0)
+    parser.AddRule("maxacts", 1, true); // max nActs for reflected beams (default = -n)
+    parser.AddRule("jmax", 1, true); // max Jones matrix norm for reflected beams (default: no filter)
+    parser.AddRule("goi", 0, true); // incoherent reflected beam accumulation (intensity sum)
     parser.AddRule("noinit", 0, true); // skip field files, output only shape (for x_0=0 start)
+    parser.AddRule("wkb", 0, true); // WKB phase: propagate along incDir (not refracted) inside medium
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -259,6 +341,14 @@ int main(int argc, const char* argv[])
             height = args.GetDoubleValue("p", 1); // edge length
             particle = new CubeParticle(refrIndex, height);
             break;
+        case ParticleType::Sphere:
+        {
+            diameter = args.GetDoubleValue("p", 1); // diameter
+            int nla = (args.GetArgNumber("p") >= 3) ? args.GetIntValue("p", 2) : 10;
+            int nlo = (args.GetArgNumber("p") >= 4) ? args.GetIntValue("p", 3) : 20;
+            particle = new SphereParticle(refrIndex, diameter, nla, nlo);
+            break;
+        }
         case ParticleType::ConcaveHexagonal:
             height = args.GetDoubleValue("p", 1);
             diameter = args.GetDoubleValue("p", 2);
@@ -368,7 +458,6 @@ int main(int argc, const char* argv[])
 
     tracer.m_summary = additionalSummary;
     ScatteringRange grid = SetConus(args);
-    handler->isCoh = !args.IsCatched("incoh");
     handler->SetScatteringSphere(grid);
     handler->SetAbsorptionAccounting(isAbs);
     tracer.SetHandler(handler);
@@ -425,24 +514,23 @@ int main(int argc, const char* argv[])
             cout << "Captured " << segments.size() << " internal beam segments" << endl;
 
             // Per-facet refracted plane waves with boundary smoothing
-            addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction);
+            bool useWKB = args.IsCatched("wkb");
+            addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction, useWKB);
 
-            // Reflections: analytical PW (default), GO beams (--go), Fabry-Perot (--fp), none (--norefl)
+            // Reflections: GO-traced beams (default), Fabry-Perot (--fp), none (--norefl)
             if (!args.IsCatched("norefl"))
             {
                 if (args.IsCatched("fp"))
                     addaField.AddPerFacetReflection(tracer.m_incidentLight.direction);
-                else if (args.IsCatched("go"))
-                {
-                    double minNF = args.IsCatched("nf") ? args.GetDoubleValue("nf") : 1.0;
-                    double rScale = args.IsCatched("rscale") ? args.GetDoubleValue("rscale") : 1.0;
-                    addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
-                                                       0.5, args.IsCatched("diffr"), minNF, rScale);
-                }
                 else
                 {
-                    double rMax = args.IsCatched("rmax") ? args.GetDoubleValue("rmax") : 0.25;
-                    addaField.AddAnalyticalReflection(tracer.m_incidentLight.direction, rMax);
+                    double maxJN = args.IsCatched("jmax") ? args.GetDoubleValue("jmax") : 1e10;
+                    double minNF = args.IsCatched("nf") ? args.GetDoubleValue("nf") : 0.0;
+                    double rScale = args.IsCatched("rscale") ? args.GetDoubleValue("rscale") : 1.0;
+                    int maxActs = args.IsCatched("maxacts") ? args.GetIntValue("maxacts") : reflNum;
+                    bool goIncoh = args.IsCatched("goi");
+                    addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
+                                                       maxJN, args.IsCatched("diffr"), minNF, rScale, maxActs, goIncoh);
                 }
             }
 

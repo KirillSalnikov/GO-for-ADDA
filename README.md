@@ -46,7 +46,6 @@ Binary: `bin/mbs`
 | `-o NAME` | Output file/directory prefix (default: `M`) |
 | `--close` | Exit after computation (no "press key" prompt) |
 | `--abs` | Account for absorption (uses Im part of `--ri`) |
-| `--incoh` | Incoherent scattering (no interference between beams) |
 | `-r RATIO` | Beam area restriction ratio for splitting (default: 100) |
 | `--log SEC` | Progress output interval in seconds |
 | `--forced_convex` | Force convex particle tracing |
@@ -98,13 +97,15 @@ adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \
 | `--adda` | Enable ADDA mode (requires `--fixed` and `-w`) |
 | `--dpl N` | Dipoles per wavelength (default: 10) |
 | `--noinit` | Output only shape file, skip field files (for x₀=0 baseline) |
-| `--norefl` | Direct refracted wave only, no internal reflections |
-| `--rmax R` | Max \|Rs\|,\|Rp\| for analytical reflections (default: 0.25) |
-| `--go` | Use GO-traced reflected beams instead of analytical |
-| `--fp` | Fabry-Perot reflection model (anti-parallel facets only) |
-| `--diffr` | Kirchhoff diffraction for GO reflections (with `--go`) |
-| `--nf N` | Min Fresnel number for GO beams (with `--go`, default: 1.0) |
-| `--rscale α` | Amplitude scaling for GO reflections (with `--go`, default: 1.0) |
+| `--norefl` | Direct refracted wave only, no reflections |
+| `--fp` | Legacy Fabry-Perot reflection model (anti-parallel facets only) |
+| `--maxacts N` | Max internal reflections per beam (default: `-n` value) |
+| `--jmax J` | Max Jones matrix norm filter (default: no filter) |
+| `--diffr` | Kirchhoff diffraction weighting for reflected beams |
+| `--nf N` | Min Fresnel number for reflected beams (default: 0.0) |
+| `--rscale α` | Amplitude scaling for reflected beams (default: 1.0) |
+| `--goi` | Incoherent reflected beam accumulation |
+| `--wkb` | WKB phase mode (propagate along incident direction inside medium) |
 
 ### Output Files
 
@@ -116,11 +117,9 @@ adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \
 
 ### Reflection Modes
 
-**Default (analytical reflections)** — best overall. For each illuminated entry facet, traces a refracted ray to the opposite exit facet, computes Fresnel reflection Rs, Rp, and adds a reflected plane wave. Filters: anti-parallel facets only (nn_dot < -0.5), |R| < 0.25, no TIR. Helps at normal incidence (RE₀ reduced 8-22%), never hurts at oblique.
+**Default (GO-traced beams)** — uses actual GO-traced beam segments with full Jones matrices. All reflected beams up to `nActs = -n` are included with no amplitude filtering. Use `--maxacts`, `--jmax`, `--nf` to restrict if needed.
 
-**`--go`** — uses actual GO-traced beam segments (nActs=1). Accurate amplitude/phase from Jones matrices but sharp beam boundaries cause artifacts at oblique incidence.
-
-**`--fp`** — legacy Fabry-Perot model. Only works for anti-parallel facet pairs with |R| < 0.35.
+**`--fp`** — legacy Fabry-Perot analytical model. Only works for anti-parallel facet pairs with small Fresnel coefficients.
 
 **`--norefl`** — only the direct refracted wave, no reflections at all.
 
@@ -130,7 +129,7 @@ adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \
 - Particle is rotated, not light: `-prop 0 0 -1` is always correct for ADDA
 - ADDA convention: incPolY = (0,1,0), incPolX = (-1,0,0) when prop = (0,0,-1)
 
-See [MBS-GO/ADDA_BRIDGE.md](MBS-GO/ADDA_BRIDGE.md) for detailed technical documentation, test results, and physical conventions.
+See [MBS-GO/ADDA_BRIDGE_MANUAL.md](MBS-GO/ADDA_BRIDGE_MANUAL.md) for detailed technical documentation, test results, and physical conventions.
 
 ## License
 

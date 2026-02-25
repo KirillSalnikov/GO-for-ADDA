@@ -257,7 +257,6 @@ public:
     int nTheta;
     int m_nBadBeams;
     bool m_isBadBeam;
-    bool isCoh = true;
     ScatteringRange m_sphere;
     double normIndexGamma;
     double m_outputEnergy = 0;

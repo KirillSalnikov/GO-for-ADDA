@@ -35,7 +35,7 @@ The quality metric is **RE_000** — the initial residual norm reported by ADDA.
           --grid 0 180 1 1 \
           --fixed <beta> <gamma> \
           -w <wavelength_um> \
-          --adda --dpl <dpl> --close
+          --adda --dpl <dpl>
 
 # Run ADDA with the generated initial field
 adda -shape read M_shape.dat \
@@ -50,7 +50,6 @@ adda -shape read M_shape.dat \
 |------|-------------|
 | `--adda` | Enable ADDA bridge mode |
 | `--dpl N` | Dipoles per lambda (grid resolution, default: 10) |
-| `--close` | Auto-close GUI window |
 | `--fixed beta gamma` | Incidence angles in degrees |
 | `-n N` | Number of GO internal reflections |
 
@@ -86,7 +85,7 @@ By default, GO-traced reflected beams are accumulated with all segments up to `n
 # Hexagonal column 10x5 um, n=1.3116, beta=30 deg, dpl=10
 ./bin/mbs -p 1 10 5 --ri 1.3116 0.0 -n 5 \
           --grid 0 180 1 1 --fixed 30 0 \
-          -w 0.532 --adda --dpl 10 --close
+          -w 0.532 --adda --dpl 10
 
 # Run ADDA
 adda -shape read M_shape.dat -dpl 10 \

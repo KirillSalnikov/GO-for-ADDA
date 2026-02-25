@@ -111,7 +111,9 @@ void Splitting::ComputeRegularJonesParams(const Point3f &normal, const Beam &inc
     inBeam.J = incidentBeam.J;
     outBeam.J = incidentBeam.J;
 
-    double cosG = DotProduct(normal, outBeam.direction);
+    // Complex cosθ_t from Snell's law (crystal→air: m·sinθ_i = sinθ_t)
+    // Principal branch of sqrt gives Re(cosG) ≥ 0 (correct for energy flow)
+    complex cosG = sqrt(1.0 - m_ri * m_ri * (1.0 - cosA * cosA));
 
     complex tmp0 = m_ri * cosA;
     complex tmp1 = m_ri * cosG;
@@ -148,15 +150,15 @@ void Splitting::ComputeInternalRefractiveDirection(const Vector3f &r,
 
 void Splitting::ComputeCRJonesParams(complex &cv, complex &ch)
 {
-    const double bf = reRiEff*(1.0 - cosA*cosA) - 1.0;
-    double im = (bf > 0) ? sqrt(bf) : 0;
+    // Complex cosθ_t from Snell's law (crystal→air, TIR regime)
+    // Same formula as regular case; for real m in TIR, cosT is purely imaginary
+    complex cosT = sqrt(1.0 - m_ri * m_ri * (1.0 - cosA * cosA));
 
-    const complex sq(0, im);
     complex tmp0 = m_ri * cosA;
-    complex tmp1 = m_ri * sq;
+    complex tmp1 = m_ri * cosT;
 
     cv = (cosA - tmp1)/(tmp1 + cosA);
-    ch = (tmp0 - sq)/(tmp0 + sq);
+    ch = (tmp0 - cosT)/(tmp0 + cosT);
 }
 
 void Splitting::ComputeCosA(const Point3f &normal, const Point3f &incidentDir)
@@ -260,7 +262,10 @@ void Splitting::ComputeRegularBeamParamsExternal(const Point3f &facetNormal,
 
     outBeam.SetLight(refrDir, incidentBeam.polarizationBasis);
 
-    double cosB = DotProduct(facetNormal, inBeam.direction);
+    // Complex cosθ_t from Snell's law (air→crystal: sinθ_i = m·sinθ_t)
+    // γ = sqrt(m² - sin²θ_i), cosθ_t = γ/m
+    complex gamma_t = sqrt(m_ri * m_ri - (1.0 - cosA * cosA));
+    complex cosB = gamma_t / m_ri;
 
     complex tmp0 = m_ri * cosA;
     complex tmp1 = m_ri * cosB;

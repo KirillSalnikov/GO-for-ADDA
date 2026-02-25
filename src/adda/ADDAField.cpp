@@ -136,7 +136,6 @@ ADDAFieldComputer::ADDAFieldComputer(Particle *particle, double wavelength,
     : m_particle(particle),
       m_wavelength(wavelength),
       m_ri(ri),
-      m_segCount(0),
       m_zMax(0),
       m_boxX(0), m_boxY(0), m_boxZ(0)
 {
@@ -336,106 +335,6 @@ double ADDAFieldComputer::MinEdgeDistance(const Point3f &proj,
     return minDist;
 }
 
-void ADDAFieldComputer::AccumulateBeamContribution(const InternalBeamSegment &seg)
-{
-    // Beam local polarization basis
-    Point3d e_perp(seg.polarizationBasis.cx,
-                   seg.polarizationBasis.cy,
-                   seg.polarizationBasis.cz);
-    Point3d d(seg.direction.cx, seg.direction.cy, seg.direction.cz);
-    Point3d e_par = CrossProductD(d, e_perp);
-    double len = LengthD(e_par);
-    if (len < 1e-12) return;
-    e_par = e_par / len;
-
-    double re_n = real(m_ri);
-    double im_n = imag(m_ri);
-
-    // Compute polygon normal from exit polygon vertices for containment test
-    Point3f polyNormal(0, 0, 0);
-    if (seg.polyNVertices >= 3)
-    {
-        Point3f e1 = seg.polyArr[1] - seg.polyArr[0];
-        Point3f e2 = seg.polyArr[2] - seg.polyArr[0];
-        polyNormal = CrossProduct(e1, e2);
-        float pnLen = (float)Length(polyNormal);
-        if (pnLen > 1e-10f)
-            polyNormal = polyNormal / (double)pnLen;
-    }
-
-    for (size_t di = 0; di < m_dipoles.size(); ++di)
-    {
-        DipoleField &dip = m_dipoles[di];
-
-        // First-write-wins: skip dipoles already covered by another beam
-        if (dip.nContributions > 0)
-            continue;
-
-        Point3f r((float)dip.x, (float)dip.y, (float)dip.z);
-
-        // Distance from beam entry plane to dipole along beam direction
-        double t = (double)seg.direction.cx * r.cx
-                 + (double)seg.direction.cy * r.cy
-                 + (double)seg.direction.cz * r.cz
-                 + seg.front;
-
-        // Check within segment bounds
-        if (t < -1e-6 || t > seg.segmentLength + 1e-6)
-            continue;
-
-        // Project dipole to exit facet plane along beam direction
-        Point3f exitNorm = seg.exitNormal;
-        double dp_nr = (double)r.cx * exitNorm.cx
-                     + (double)r.cy * exitNorm.cy
-                     + (double)r.cz * exitNorm.cz
-                     + seg.exitD;
-        double dp_nd = (double)seg.direction.cx * exitNorm.cx
-                     + (double)seg.direction.cy * exitNorm.cy
-                     + (double)seg.direction.cz * exitNorm.cz;
-
-        if (fabs(dp_nd) < 1e-10)
-            continue;
-
-        double t_exit = -dp_nr / dp_nd;
-        Point3f r_proj(r.cx + seg.direction.cx * (float)t_exit,
-                       r.cy + seg.direction.cy * (float)t_exit,
-                       r.cz + seg.direction.cz * (float)t_exit);
-
-        // Check if projection is inside the intersection polygon
-        if (!IsInsidePolygon(r_proj, seg.polyArr, seg.polyNVertices, polyNormal))
-            continue;
-
-        // Compute phase from GO optical path
-        double delta_OP = t * re_n;
-        double total_OP = seg.opticalPath + delta_OP;
-        complex phase = exp_im(m_k * total_OP);
-
-        // Absorption
-        if (im_n > 1e-15)
-        {
-            phase = phase * exp(-m_k * im_n * t);
-        }
-
-        ++dip.nContributions;
-
-        // Jones matrix: first-write (=), not accumulate (+=)
-        // e_perp = s-direction, e_par = p-direction
-        // Y-polarization: pure s-input → (0, 1) in (p, s) basis
-        complex Ep_Y = seg.J.m22 * phase;
-        complex Epar_Y = seg.J.m12 * phase;
-        dip.Ex_Y = Ep_Y * e_perp.x + Epar_Y * e_par.x;
-        dip.Ey_Y = Ep_Y * e_perp.y + Epar_Y * e_par.y;
-        dip.Ez_Y = Ep_Y * e_perp.z + Epar_Y * e_par.z;
-
-        // X-polarization: pure -p-input → (-1, 0) in (p, s) basis
-        complex Ep_X = -seg.J.m21 * phase;
-        complex Epar_X = -seg.J.m11 * phase;
-        dip.Ex_X = Ep_X * e_perp.x + Epar_X * e_par.x;
-        dip.Ey_X = Ep_X * e_perp.y + Epar_X * e_par.y;
-        dip.Ez_X = Ep_X * e_perp.z + Epar_X * e_par.z;
-    }
-}
-
 void ADDAFieldComputer::WriteGeometryFile(const string &filename) const
 {
     ofstream file(filename);
@@ -521,95 +420,6 @@ void ADDAFieldComputer::WriteFieldFileX(const string &filename) const
     cout << "Wrote X-pol field: " << filename << endl;
 }
 
-void ADDAFieldComputer::FillUncoveredWithPlaneWave(const Point3f &refractedDir,
-                                                     const Point3f &incidentDir,
-                                                     double Ts, double Tp)
-{
-    // Fill uncovered dipoles (nContributions==0) with refracted plane wave.
-    // Uses the same phase and polarization logic as ApplyUniformBeam.
-    double re_n = real(m_ri);
-    double im_n = imag(m_ri);
-
-    double dx = (double)refractedDir.cx;
-    double dy = (double)refractedDir.cy;
-    double dz = (double)refractedDir.cz;
-    double ix = (double)incidentDir.cx;
-    double iy = (double)incidentDir.cy;
-    double iz = (double)incidentDir.cz;
-
-    // s/p polarization basis from plane of incidence
-    double sx = iy * dz - iz * dy;
-    double sy = iz * dx - ix * dz;
-    double sz = ix * dy - iy * dx;
-    double slen = sqrt(sx*sx + sy*sy + sz*sz);
-
-    double EY_x, EY_y, EY_z;
-    double EX_x, EX_y, EX_z;
-
-    if (slen < 1e-6)
-    {
-        double T = 0.5 * (Ts + Tp);
-        EY_x = 0; EY_y = T; EY_z = 0;
-        EX_x = -T; EX_y = 0; EX_z = 0;
-    }
-    else
-    {
-        sx /= slen; sy /= slen; sz /= slen;
-        double pix = sy * iz - sz * iy;
-        double piy = sz * ix - sx * iz;
-        double piz = sx * iy - sy * ix;
-        double pilen = sqrt(pix*pix + piy*piy + piz*piz);
-        pix /= pilen; piy /= pilen; piz /= pilen;
-        double prx = sy * dz - sz * dy;
-        double pry = sz * dx - sx * dz;
-        double prz = sx * dy - sy * dx;
-        double prlen = sqrt(prx*prx + pry*pry + prz*prz);
-        prx /= prlen; pry /= prlen; prz /= prlen;
-
-        double Eys = sy, Eyp = piy;
-        EY_x = Ts * Eys * sx + Tp * Eyp * prx;
-        EY_y = Ts * Eys * sy + Tp * Eyp * pry;
-        EY_z = Ts * Eys * sz + Tp * Eyp * prz;
-
-        double Exs = -sx, Exp = -pix;
-        EX_x = Ts * Exs * sx + Tp * Exp * prx;
-        EX_y = Ts * Exs * sy + Tp * Exp * pry;
-        EX_z = Ts * Exs * sz + Tp * Exp * prz;
-    }
-
-
-    double externalOP = iz * m_zMax;
-    double dRefDotRef = dz * m_zMax;
-
-    int uncovered = 0;
-    for (size_t i = 0; i < m_dipoles.size(); ++i)
-    {
-        DipoleField &dip = m_dipoles[i];
-        if (dip.nContributions == 0)
-        {
-            double t = dx * dip.x + dy * dip.y + dz * dip.z - dRefDotRef;
-            double total_OP = externalOP + re_n * t;
-            complex phase = exp_im(m_k * total_OP);
-
-            if (im_n > 1e-15)
-            {
-                double tAbs = (t > 0) ? t : 0;
-                phase = phase * exp(-m_k * im_n * tAbs);
-            }
-
-            dip.Ex_Y = EY_x * phase;
-            dip.Ey_Y = EY_y * phase;
-            dip.Ez_Y = EY_z * phase;
-            dip.Ex_X = EX_x * phase;
-            dip.Ey_X = EX_y * phase;
-            dip.Ez_X = EX_z * phase;
-            ++uncovered;
-        }
-    }
-    cout << "Dipoles covered by GO: " << (m_dipoles.size() - uncovered)
-         << ", fallback to refracted plane wave: " << uncovered << endl;
-}
-
 void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
                                                bool useWKB)
 {
@@ -624,15 +434,17 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
     struct FacetRefr {
         int id;
         double cosI;
-        Point3f refDir;
-        double Ts, Tp;
-        // E-field amplitude vectors for Y-pol and X-pol
-        double EY_x, EY_y, EY_z;
-        double EX_x, EX_y, EX_z;
+        Point3f refDir;        // real refracted direction (for back-projection)
+        // Complex E-field amplitude vectors for Y-pol and X-pol
+        complex EY_x, EY_y, EY_z;
+        complex EX_x, EX_y, EX_z;
         // Phase reference: incDir . facetCenter
         double phaseRef;
+        // Complex normal wavevector component: gamma = sqrt(m^2 - sin^2 theta_i)
+        complex gamma;
+        // Facet inward normal (for phase computation)
+        double nx, ny, nz;
     };
-
 
     vector<FacetRefr> facetList;
 
@@ -646,20 +458,28 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
         if (cosI < 1e-6)
             continue;
 
-        // Snell's law: refracted direction
         double sinIsq = 1.0 - cosI*cosI;
-        double cosT = sqrt(fmax(0.0, 1.0 - sinIsq/(re_n*re_n)));
+
+        // Complex Snell's law: gamma = sqrt(m^2 - sin^2 theta_i)
+        // gamma = m * cos(theta_t), where theta_t is complex for absorbing media
+        complex gamma = sqrt(m_ri * m_ri - complex(sinIsq, 0));
+        // Ensure Im(gamma) > 0 (wave decays into crystal)
+        if (imag(gamma) < 0) gamma = -gamma;
+
+        // Real refracted direction (for back-projection geometry only)
+        double cosT_real = sqrt(fmax(0.0, 1.0 - sinIsq/(re_n*re_n)));
         double eta = 1.0 / re_n;
-        double C = cosT - eta * cosI;
-        double rdx = eta * ix + C * nx;
-        double rdy = eta * iy + C * ny;
-        double rdz = eta * iz + C * nz;
+        double Cv = cosT_real - eta * cosI;
+        double rdx = eta * ix + Cv * nx;
+        double rdy = eta * iy + Cv * ny;
+        double rdz = eta * iz + Cv * nz;
         double rlen = sqrt(rdx*rdx + rdy*rdy + rdz*rdz);
         rdx /= rlen; rdy /= rlen; rdz /= rlen;
 
-        // Fresnel transmission coefficients
-        double Ts = 2.0 * cosI / (cosI + re_n * cosT);
-        double Tp = 2.0 * cosI / (re_n * cosI + cosT);
+        // Complex Fresnel transmission coefficients (air -> medium)
+        // Ts = 2 cos_i / (cos_i + gamma),  Tp = 2 m cos_i / (m^2 cos_i + gamma)
+        complex Ts = 2.0 * cosI / (cosI + gamma);
+        complex Tp = 2.0 * m_ri * cosI / (m_ri * m_ri * cosI + gamma);
 
         // s/p polarization basis from plane of incidence (incDir, refDir)
         double sx = iy*rdz - iz*rdy;
@@ -667,13 +487,13 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
         double sz = ix*rdy - iy*rdx;
         double slen = sqrt(sx*sx + sy*sy + sz*sz);
 
-        double EY_x, EY_y, EY_z;
-        double EX_x, EX_y, EX_z;
+        complex EY_x, EY_y, EY_z;
+        complex EX_x, EX_y, EX_z;
 
         if (slen < 1e-6)
         {
-            // Normal incidence: Ts ~ Tp
-            double T = 0.5 * (Ts + Tp);
+            // Normal incidence
+            complex T = 0.5 * (Ts + Tp);
             EY_x = 0; EY_y = T; EY_z = 0;
             EX_x = -T; EX_y = 0; EX_z = 0;
         }
@@ -702,20 +522,20 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
 
             // X-pol: E_inc = (-1,0,0)
             double Exs = -sx;
-            double Exp = -pix_;
-            EX_x = Ts*Exs*sx + Tp*Exp*prx;
-            EX_y = Ts*Exs*sy + Tp*Exp*pry;
-            EX_z = Ts*Exs*sz + Tp*Exp*prz;
+            double Exp_ = -pix_;
+            EX_x = Ts*Exs*sx + Tp*Exp_*prx;
+            EX_y = Ts*Exs*sy + Tp*Exp_*pry;
+            EX_z = Ts*Exs*sz + Tp*Exp_*prz;
         }
 
         FacetRefr fr;
         fr.id = f;
         fr.cosI = cosI;
         fr.refDir = Point3f((float)rdx, (float)rdy, (float)rdz);
-        fr.Ts = Ts;
-        fr.Tp = Tp;
         fr.EY_x = EY_x; fr.EY_y = EY_y; fr.EY_z = EY_z;
         fr.EX_x = EX_x; fr.EX_y = EX_y; fr.EX_z = EX_z;
+        fr.gamma = gamma;
+        fr.nx = nx; fr.ny = ny; fr.nz = nz;
         // Phase ref: external OP to facet center
         double cx_ = (double)fac.center.cx;
         double cy_ = (double)fac.center.cy;
@@ -753,11 +573,13 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
     {
         // Pyramid mode: all facets are steeply tilted, per-facet PW creates
         // wrong phase patterns. Use a single PW along incDir with
-        // area-weighted average Fresnel amplitude.
+        // area-weighted average Fresnel amplitude and average gamma.
         double totalWeight = 0;
-        double avgEY_x = 0, avgEY_y = 0, avgEY_z = 0;
-        double avgEX_x = 0, avgEX_y = 0, avgEX_z = 0;
+        complex avgEY_x(0,0), avgEY_y(0,0), avgEY_z(0,0);
+        complex avgEX_x(0,0), avgEX_y(0,0), avgEX_z(0,0);
         double avgCx = 0, avgCy = 0, avgCz = 0;
+        complex avgGamma(0,0);
+        double avgNx = 0, avgNy = 0, avgNz = 0;
         for (size_t fi = 0; fi < facetList.size(); ++fi) {
             const FacetRefr &fr = facetList[fi];
             const Facet &fac = m_particle->facets[fr.id];
@@ -768,14 +590,20 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
             avgCx += w * (double)fac.center.cx;
             avgCy += w * (double)fac.center.cy;
             avgCz += w * (double)fac.center.cz;
+            avgGamma += w * fr.gamma;
+            avgNx += w * fr.nx; avgNy += w * fr.ny; avgNz += w * fr.nz;
         }
         avgEY_x /= totalWeight; avgEY_y /= totalWeight; avgEY_z /= totalWeight;
         avgEX_x /= totalWeight; avgEX_y /= totalWeight; avgEX_z /= totalWeight;
         avgCx /= totalWeight; avgCy /= totalWeight; avgCz /= totalWeight;
+        avgGamma /= totalWeight;
+        avgNx /= totalWeight; avgNy /= totalWeight; avgNz /= totalWeight;
         double avgPhaseRef = ix*avgCx + iy*avgCy + iz*avgCz;
+        // Average cosI for pyramid mode
+        double avgCosI = ix*avgNx + iy*avgNy + iz*avgNz;
 
-        cout << "  Pyramid mode: avg E_Y=(" << avgEY_x << "," << avgEY_y << ","
-             << avgEY_z << "), ref=(" << avgCx << "," << avgCy << "," << avgCz << ")" << endl;
+        cout << "  Pyramid mode: avg |E_Y|=" << abs(avgEY_x) << "," << abs(avgEY_y) << ","
+             << abs(avgEY_z) << "), ref=(" << avgCx << "," << avgCy << "," << avgCz << ")" << endl;
 
         for (size_t i = 0; i < m_dipoles.size(); ++i)
         {
@@ -784,15 +612,13 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
                 continue;
 
             ++uncovered;
-            double t_int = ix*(dip.x - avgCx) + iy*(dip.y - avgCy) + iz*(dip.z - avgCz);
-            double total_OP = avgPhaseRef + re_n * t_int;
-            complex phase = exp_im(m_k * total_OP);
-
-            if (im_n > 1e-15)
-            {
-                double tAbs = (t_int > 0) ? t_int : 0;
-                phase = phase * exp(-m_k * im_n * tAbs);
-            }
+            double dx_ = dip.x - avgCx, dy_ = dip.y - avgCy, dz_ = dip.z - avgCz;
+            double inc_dot_dr = ix*dx_ + iy*dy_ + iz*dz_;
+            double dr_n = avgNx*dx_ + avgNy*dy_ + avgNz*dz_;
+            // Phase: k * [extOP + incDir·Δr + (gamma - cosI) * (n·Δr)]
+            double phase_re = avgPhaseRef + inc_dot_dr + (real(avgGamma) - avgCosI) * dr_n;
+            double phase_decay = imag(avgGamma) * dr_n;
+            complex phase = exp_im(m_k * phase_re) * exp(-m_k * phase_decay);
 
             dip.Ex_Y = avgEY_x * phase;
             dip.Ey_Y = avgEY_y * phase;
@@ -862,25 +688,17 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
             if (!goCovered)
             {
                 // Fill field with per-facet PW using exact entry point
-                double rdx = (double)fr.refDir.cx;
-                double rdy = (double)fr.refDir.cy;
-                double rdz = (double)fr.refDir.cz;
                 double px = (double)proj.cx;
                 double py = (double)proj.cy;
                 double pz = (double)proj.cz;
                 double extOP = ix*px + iy*py + iz*pz;
                 double dx_ = dip.x - px, dy_ = dip.y - py, dz_ = dip.z - pz;
-                double t_int = useWKB
-                    ? ix*dx_ + iy*dy_ + iz*dz_
-                    : rdx*dx_ + rdy*dy_ + rdz*dz_;
-                double total_OP = extOP + re_n * t_int;
-                complex phase = exp_im(m_k * total_OP);
-
-                if (im_n > 1e-15)
-                {
-                    double tAbs = (t_int > 0) ? t_int : 0;
-                    phase = phase * exp(-m_k * im_n * tAbs);
-                }
+                // Phase: k * [extOP + incDir·Δr + (gamma - cosI) * (n̂·Δr)]
+                double inc_dot_dr = ix*dx_ + iy*dy_ + iz*dz_;
+                double dr_n = fr.nx*dx_ + fr.ny*dy_ + fr.nz*dz_;
+                double phase_re = extOP + inc_dot_dr + (real(fr.gamma) - fr.cosI) * dr_n;
+                double phase_decay = imag(fr.gamma) * dr_n;
+                complex phase = exp_im(m_k * phase_re) * exp(-m_k * phase_decay);
 
                 dip.Ex_Y = fr.EY_x * phase;
                 dip.Ey_Y = fr.EY_y * phase;
@@ -902,9 +720,6 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
             if (!goCovered)
             {
                 const Facet &fac = m_particle->facets[fr.id];
-                double rdx = (double)fr.refDir.cx;
-                double rdy = (double)fr.refDir.cy;
-                double rdz = (double)fr.refDir.cz;
                 double fb_nr = (double)dip.x * fac.in_normal.cx
                              + (double)dip.y * fac.in_normal.cy
                              + (double)dip.z * fac.in_normal.cz
@@ -918,17 +733,11 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
                 double pz = dip.z + iz * fb_t;
                 double extOP = ix*px + iy*py + iz*pz;
                 double dx_ = dip.x - px, dy_ = dip.y - py, dz_ = dip.z - pz;
-                double t_int = useWKB
-                    ? ix*dx_ + iy*dy_ + iz*dz_
-                    : rdx*dx_ + rdy*dy_ + rdz*dz_;
-                double total_OP = extOP + re_n * t_int;
-                complex phase = exp_im(m_k * total_OP);
-
-                if (im_n > 1e-15)
-                {
-                    double tAbs = (t_int > 0) ? t_int : 0;
-                    phase = phase * exp(-m_k * im_n * tAbs);
-                }
+                double inc_dot_dr = ix*dx_ + iy*dy_ + iz*dz_;
+                double dr_n = fr.nx*dx_ + fr.ny*dy_ + fr.nz*dz_;
+                double phase_re = extOP + inc_dot_dr + (real(fr.gamma) - fr.cosI) * dr_n;
+                double phase_decay = imag(fr.gamma) * dr_n;
+                complex phase = exp_im(m_k * phase_re) * exp(-m_k * phase_decay);
 
                 dip.Ex_Y = fr.EY_x * phase;
                 dip.Ey_Y = fr.EY_y * phase;
@@ -945,273 +754,6 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
     cout << "Dipoles covered by GO: " << (m_dipoles.size() - uncovered)
          << ", per-facet plane wave: " << perFacetFilled
          << ", primary-facet fallback: " << fallbackFilled << endl;
-}
-
-void ADDAFieldComputer::AddAnalyticalReflection(const Point3f &incidentDir, double maxR)
-{
-    double re_n = real(m_ri);
-    double im_n = imag(m_ri);
-
-    double ix = (double)incidentDir.cx;
-    double iy = (double)incidentDir.cy;
-    double iz = (double)incidentDir.cz;
-
-
-
-    struct FacetRefl {
-        int entryId;
-        int exitId;
-        Point3f reflDir;
-        double EY_x, EY_y, EY_z;
-        double EX_x, EX_y, EX_z;
-        double phaseRef;
-        double exitPt_x, exitPt_y, exitPt_z;
-        double pathToExit; // internal path from entry to exit (for absorption)
-    };
-
-    vector<FacetRefl> reflList;
-
-    for (int f = 0; f < m_particle->nFacets; ++f)
-    {
-        const Facet &entry = m_particle->facets[f];
-        double nx = (double)entry.in_normal.cx;
-        double ny = (double)entry.in_normal.cy;
-        double nz = (double)entry.in_normal.cz;
-        double cosI = ix*nx + iy*ny + iz*nz;
-        if (cosI < 1e-6) continue;
-
-        // Snell refraction at entry
-        double sinIsq = 1.0 - cosI*cosI;
-        double cosT = sqrt(fmax(0.0, 1.0 - sinIsq/(re_n*re_n)));
-        double eta = 1.0 / re_n;
-        double Cv = cosT - eta * cosI;
-        double rdx = eta*ix + Cv*nx;
-        double rdy = eta*iy + Cv*ny;
-        double rdz = eta*iz + Cv*nz;
-        double rlen = sqrt(rdx*rdx + rdy*rdy + rdz*rdz);
-        rdx /= rlen; rdy /= rlen; rdz /= rlen;
-
-        // Entry Fresnel transmission
-        double Ts_entry = 2.0*cosI / (cosI + re_n*cosT);
-        double Tp_entry = 2.0*cosI / (re_n*cosI + cosT);
-
-        // Find exit facet: trace refracted beam from entry center
-        int exitId = -1;
-        double minT = 1e30;
-        for (int g = 0; g < m_particle->nFacets; ++g)
-        {
-            if (g == f) continue;
-            const Facet &exitFac = m_particle->facets[g];
-            double dnr = rdx*exitFac.in_normal.cx + rdy*exitFac.in_normal.cy + rdz*exitFac.in_normal.cz;
-            if (dnr > -1e-6) continue;
-            double dp = entry.center.cx*exitFac.in_normal.cx
-                      + entry.center.cy*exitFac.in_normal.cy
-                      + entry.center.cz*exitFac.in_normal.cz
-                      + exitFac.in_normal.d_param;
-            double t = -dp / dnr;
-            if (t > 1e-6 && t < minT)
-            {
-                minT = t;
-                exitId = g;
-            }
-        }
-        if (exitId < 0) continue;
-
-        const Facet &exitFac = m_particle->facets[exitId];
-
-        // Check face pair geometry: only near-anti-parallel faces give crystal-filling PW
-        double enx = (double)exitFac.in_normal.cx;
-        double eny = (double)exitFac.in_normal.cy;
-        double enz = (double)exitFac.in_normal.cz;
-        double nn_dot = nx*enx + ny*eny + nz*enz;
-        if (nn_dot > -0.5) continue;  // skip non-anti-parallel pairs
-
-        // Internal incidence angle at exit facet
-        double cosI_exit = -(rdx*enx + rdy*eny + rdz*enz);
-        if (cosI_exit < 1e-6) continue;
-
-        // TIR check — skip total internal reflection
-        double sinI_exit_sq = 1.0 - cosI_exit*cosI_exit;
-        double sinT_exit_sq = sinI_exit_sq * re_n * re_n;
-        if (sinT_exit_sq > 1.0) continue;
-
-        double cosT_exit = sqrt(1.0 - sinT_exit_sq);
-
-        // Fresnel reflection at exit (crystal→air)
-        double Rs = (re_n*cosI_exit - cosT_exit) / (re_n*cosI_exit + cosT_exit);
-        double Rp = (cosI_exit - re_n*cosT_exit) / (cosI_exit + re_n*cosT_exit);
-
-        // Skip large reflections — PW model error grows with |R|
-        if (fabs(Rs) > maxR || fabs(Rp) > maxR) continue;
-
-        // Reflected direction
-        double reflx = rdx + 2.0*cosI_exit*enx;
-        double refly = rdy + 2.0*cosI_exit*eny;
-        double reflz = rdz + 2.0*cosI_exit*enz;
-        double refll = sqrt(reflx*reflx + refly*refly + reflz*reflz);
-        reflx /= refll; refly /= refll; reflz /= refll;
-
-        // s/p decomposition at entry
-        double sx = iy*rdz - iz*rdy;
-        double sy = iz*rdx - ix*rdz;
-        double sz = ix*rdy - iy*rdx;
-        double slen = sqrt(sx*sx + sy*sy + sz*sz);
-
-        double rEY_x, rEY_y, rEY_z;
-        double rEX_x, rEX_y, rEX_z;
-
-        if (slen < 1e-6)
-        {
-            // Normal incidence
-            double R = Rs;
-            double EY_amp = Ts_entry * R;
-            double EX_amp = Ts_entry * R;
-            rEY_x = 0; rEY_y = EY_amp; rEY_z = 0;
-            rEX_x = -EX_amp; rEX_y = 0; rEX_z = 0;
-        }
-        else
-        {
-            sx /= slen; sy /= slen; sz /= slen;
-            // p for incident wave at entry
-            double pix_ = sy*iz - sz*iy;
-            double piy_ = sz*ix - sx*iz;
-            double piz_ = sx*iy - sy*ix;
-            double pilen = sqrt(pix_*pix_ + piy_*piy_ + piz_*piz_);
-            pix_ /= pilen; piy_ /= pilen; piz_ /= pilen;
-            // p for refracted wave
-            double pfx = sy*rdz - sz*rdy;
-            double pfy = sz*rdx - sx*rdz;
-            double pfz = sx*rdy - sy*rdx;
-            double pflen = sqrt(pfx*pfx + pfy*pfy + pfz*pfz);
-            pfx /= pflen; pfy /= pflen; pfz /= pflen;
-
-            // Transmitted E inside crystal
-            double Eys = sy, Eyp = piy_;
-            double EinY_x = Ts_entry*Eys*sx + Tp_entry*Eyp*pfx;
-            double EinY_y = Ts_entry*Eys*sy + Tp_entry*Eyp*pfy;
-            double EinY_z = Ts_entry*Eys*sz + Tp_entry*Eyp*pfz;
-
-            double Exs = -sx, Exp_ = -pix_;
-            double EinX_x = Ts_entry*Exs*sx + Tp_entry*Exp_*pfx;
-            double EinX_y = Ts_entry*Exs*sy + Tp_entry*Exp_*pfy;
-            double EinX_z = Ts_entry*Exs*sz + Tp_entry*Exp_*pfz;
-
-            // Exit s/p basis
-            double eox = -enx, eoy = -eny, eoz = -enz;
-            double sex = rdy*eoz - rdz*eoy;
-            double sey = rdz*eox - rdx*eoz;
-            double sez = rdx*eoy - rdy*eox;
-            double selen = sqrt(sex*sex + sey*sey + sez*sez);
-
-            if (selen < 1e-6)
-            {
-                double R = (fabs(Rs) + fabs(Rp)) * 0.5;
-                if (Rs > 0) R = R; else R = -R;
-                rEY_x = R * EinY_x; rEY_y = R * EinY_y; rEY_z = R * EinY_z;
-                rEX_x = R * EinX_x; rEX_y = R * EinX_y; rEX_z = R * EinX_z;
-            }
-            else
-            {
-                sex /= selen; sey /= selen; sez /= selen;
-                double peix = sey*rdz - sez*rdy;
-                double peiy = sez*rdx - sex*rdz;
-                double peiz = sex*rdy - sey*rdx;
-                double peilen = sqrt(peix*peix + peiy*peiy + peiz*peiz);
-                peix /= peilen; peiy /= peilen; peiz /= peilen;
-
-                double EinY_se = EinY_x*sex + EinY_y*sey + EinY_z*sez;
-                double EinY_pe = EinY_x*peix + EinY_y*peiy + EinY_z*peiz;
-                double EinX_se = EinX_x*sex + EinX_y*sey + EinX_z*sez;
-                double EinX_pe = EinX_x*peix + EinX_y*peiy + EinX_z*peiz;
-
-                double ErY_se = Rs * EinY_se;
-                double ErY_pe = Rp * EinY_pe;
-                double ErX_se = Rs * EinX_se;
-                double ErX_pe = Rp * EinX_pe;
-
-                double prex = sey*reflz - sez*refly;
-                double prey = sez*reflx - sex*reflz;
-                double prez = sex*refly - sey*reflx;
-                double prelen = sqrt(prex*prex + prey*prey + prez*prez);
-                prex /= prelen; prey /= prelen; prez /= prelen;
-
-                rEY_x = ErY_se*sex + ErY_pe*prex;
-                rEY_y = ErY_se*sey + ErY_pe*prey;
-                rEY_z = ErY_se*sez + ErY_pe*prez;
-                rEX_x = ErX_se*sex + ErX_pe*prex;
-                rEX_y = ErX_se*sey + ErX_pe*prey;
-                rEX_z = ErX_se*sez + ErX_pe*prez;
-            }
-        }
-
-        FacetRefl fr;
-        fr.entryId = f;
-        fr.exitId = exitId;
-        fr.reflDir = Point3f((float)reflx, (float)refly, (float)reflz);
-        fr.EY_x = rEY_x; fr.EY_y = rEY_y; fr.EY_z = rEY_z;
-        fr.EX_x = rEX_x; fr.EX_y = rEX_y; fr.EX_z = rEX_z;
-        double cx_ = (double)entry.center.cx;
-        double cy_ = (double)entry.center.cy;
-        double cz_ = (double)entry.center.cz;
-        fr.exitPt_x = cx_ + minT * rdx;
-        fr.exitPt_y = cy_ + minT * rdy;
-        fr.exitPt_z = cz_ + minT * rdz;
-        fr.phaseRef = ix*cx_ + iy*cy_ + iz*cz_ + re_n * minT;
-        fr.pathToExit = minT;
-        reflList.push_back(fr);
-
-        cout << "  Analytical refl: entry=" << f << " exit=" << exitId
-             << " nn_dot=" << nn_dot
-             << " Rs=" << Rs << " Rp=" << Rp
-             << " |E_Y|=" << sqrt(rEY_x*rEY_x + rEY_y*rEY_y + rEY_z*rEY_z)
-             << " reflDir=(" << reflx << "," << refly << "," << reflz << ")"
-             << endl;
-    }
-
-    cout << "Analytical reflections: " << reflList.size() << " facet pairs" << endl;
-
-    // Apply reflected PW to all assigned dipoles (no boundary/distance restrictions)
-    int nAdded = 0;
-    for (size_t i = 0; i < m_dipoles.size(); ++i)
-    {
-        DipoleField &dip = m_dipoles[i];
-        if (dip.assignedFacet < 0) continue;
-
-        const FacetRefl *fr = nullptr;
-        for (size_t ri = 0; ri < reflList.size(); ++ri)
-        {
-            if (reflList[ri].entryId == dip.assignedFacet)
-            {
-                fr = &reflList[ri];
-                break;
-            }
-        }
-        if (!fr) continue;
-
-        double t_refl = (double)fr->reflDir.cx * (dip.x - fr->exitPt_x)
-                       + (double)fr->reflDir.cy * (dip.y - fr->exitPt_y)
-                       + (double)fr->reflDir.cz * (dip.z - fr->exitPt_z);
-
-        double total_OP = fr->phaseRef + re_n * t_refl;
-        complex phase = exp_im(m_k * total_OP);
-
-        if (im_n > 1e-15)
-        {
-            double totalPath = fr->pathToExit + t_refl;
-            if (totalPath > 0)
-                phase = phase * exp(-m_k * im_n * totalPath);
-        }
-
-        dip.Ex_Y += fr->EY_x * phase;
-        dip.Ey_Y += fr->EY_y * phase;
-        dip.Ez_Y += fr->EY_z * phase;
-        dip.Ex_X += fr->EX_x * phase;
-        dip.Ey_X += fr->EX_y * phase;
-        dip.Ez_X += fr->EX_z * phase;
-        ++nAdded;
-    }
-
-    cout << "Analytical reflections applied to " << nAdded << " dipoles" << endl;
 }
 
 void ADDAFieldComputer::AddPerFacetReflection(const Point3f &incidentDir)
@@ -1994,126 +1536,6 @@ void ADDAFieldComputer::AccumulateReflectedBeams(
          << nDipolesUpdated << " dipole updates, "
          << nSmoothed << " Kirchhoff-weighted, "
          << nEntryMissed << " entry-facet misses" << endl;
-}
-
-void ADDAFieldComputer::ApplyUniformBeam(const Point3f &refractedDir,
-                                          const Point3f &incidentDir,
-                                          double Ts, double Tp)
-{
-    // Apply a uniform refracted plane wave to ALL dipoles for non-convex particles.
-    //
-    // Phase: total_OP = dot(incDir, r_ref) + n * dot(d_refr, r - r_ref)
-    // where r_ref = (0, 0, m_zMax)
-    // Ts, Tp: Fresnel transmission coefficients (computed from cap normal in caller)
-
-    double re_n = real(m_ri);
-    double im_n = imag(m_ri);
-
-    double dx = (double)refractedDir.cx;
-    double dy = (double)refractedDir.cy;
-    double dz = (double)refractedDir.cz;
-
-    // Build s/p polarization basis from plane of incidence (incDir, d_refr)
-    // s = normalize(cross(incDir, d_refr)) — perpendicular to plane of incidence
-    double ix = (double)incidentDir.cx;
-    double iy = (double)incidentDir.cy;
-    double iz = (double)incidentDir.cz;
-
-    double sx = iy * dz - iz * dy;
-    double sy = iz * dx - ix * dz;
-    double sz = ix * dy - iy * dx;
-    double slen = sqrt(sx*sx + sy*sy + sz*sz);
-
-    // Precompute E-field vectors for Y-pol and X-pol
-    // These are constant across all dipoles (uniform plane wave)
-    double EY_x, EY_y, EY_z;  // refracted E for Y-pol incident (0,1,0)
-    double EX_x, EX_y, EX_z;  // refracted E for X-pol incident (-1,0,0)
-
-    if (slen < 1e-6)
-    {
-        // Near-normal incidence: Ts ≈ Tp, no rotation needed
-        double T = 0.5 * (Ts + Tp);
-        EY_x = 0; EY_y = T; EY_z = 0;
-        EX_x = -T; EX_y = 0; EX_z = 0;
-    }
-    else
-    {
-        sx /= slen; sy /= slen; sz /= slen;
-
-        // p_inc = cross(s, incDir) — p-direction for incident beam
-        double pix = sy * iz - sz * iy;
-        double piy = sz * ix - sx * iz;
-        double piz = sx * iy - sy * ix;
-        double pilen = sqrt(pix*pix + piy*piy + piz*piz);
-        pix /= pilen; piy /= pilen; piz /= pilen;
-
-        // p_refr = cross(s, d_refr) — p-direction for refracted beam
-        double prx = sy * dz - sz * dy;
-        double pry = sz * dx - sx * dz;
-        double prz = sx * dy - sy * dx;
-        double prlen = sqrt(prx*prx + pry*pry + prz*prz);
-        prx /= prlen; pry /= prlen; prz /= prlen;
-
-        // Y-pol: E_inc = (0,1,0). Decompose into s and p_inc:
-        double Eys = sy;       // dot((0,1,0), s)
-        double Eyp = piy;     // dot((0,1,0), p_inc)
-        EY_x = Ts * Eys * sx + Tp * Eyp * prx;
-        EY_y = Ts * Eys * sy + Tp * Eyp * pry;
-        EY_z = Ts * Eys * sz + Tp * Eyp * prz;
-
-        // X-pol: E_inc = (-1,0,0). Decompose into s and p_inc:
-        double Exs = -sx;     // dot((-1,0,0), s)
-        double Exp = -pix;    // dot((-1,0,0), p_inc)
-        EX_x = Ts * Exs * sx + Tp * Exp * prx;
-        EX_y = Ts * Exs * sy + Tp * Exp * pry;
-        EX_z = Ts * Exs * sz + Tp * Exp * prz;
-    }
-
-
-    double externalOP = iz * m_zMax;
-    double dRefDotRef = dz * m_zMax;
-
-    for (size_t di = 0; di < m_dipoles.size(); ++di)
-    {
-        DipoleField &dip = m_dipoles[di];
-        double t = dx * dip.x + dy * dip.y + dz * dip.z - dRefDotRef;
-
-        double total_OP = externalOP + re_n * t;
-        complex phase = exp_im(m_k * total_OP);
-
-        if (im_n > 1e-15)
-        {
-            double tAbs = (t > 0) ? t : 0;
-            phase = phase * exp(-m_k * im_n * tAbs);
-        }
-
-        dip.nContributions = 1;
-
-        dip.Ex_Y = EY_x * phase;
-        dip.Ey_Y = EY_y * phase;
-        dip.Ez_Y = EY_z * phase;
-
-        dip.Ex_X = EX_x * phase;
-        dip.Ey_X = EX_y * phase;
-        dip.Ez_X = EX_z * phase;
-    }
-
-    cout << "Applied uniform beam to all " << m_dipoles.size() << " dipoles"
-         << " (d_refr=" << dx << "," << dy << "," << dz
-         << ", Ts=" << Ts << ", Tp=" << Tp << ")" << endl;
-    cout << "  EY=(" << EY_x << "," << EY_y << "," << EY_z
-         << ") EX=(" << EX_x << "," << EX_y << "," << EX_z << ")" << endl;
-}
-
-void ADDAFieldComputer::ResetAllFields()
-{
-    for (size_t i = 0; i < m_dipoles.size(); ++i)
-    {
-        DipoleField &dip = m_dipoles[i];
-        dip.Ex_Y = dip.Ey_Y = dip.Ez_Y = complex(0, 0);
-        dip.Ex_X = dip.Ey_X = dip.Ez_X = complex(0, 0);
-        dip.nContributions = 0;
-    }
 }
 
 void ADDAFieldComputer::DiagnoseGOvsPW(const Point3f &incidentDir)

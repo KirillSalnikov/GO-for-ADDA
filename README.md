@@ -42,10 +42,9 @@ Binary: `bin/mbs`
 
 | Argument | Description |
 |----------|-------------|
-| `-w λ` | Wavelength in µm (required for `--adda` and `--abs`) |
+| `-w λ` | Wavelength in µm (required for `--adda`) |
 | `-o NAME` | Output file/directory prefix (default: `M`) |
 | `--close` | Exit after computation (no "press key" prompt) |
-| `--abs` | Account for absorption (uses Im part of `--ri`) |
 | `-r RATIO` | Beam area restriction ratio for splitting (default: 100) |
 | `--log SEC` | Progress output interval in seconds |
 | `--forced_convex` | Force convex particle tracing |
@@ -99,13 +98,11 @@ adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \
 | `--noinit` | Output only shape file, skip field files (for x₀=0 baseline) |
 | `--norefl` | Direct refracted wave only, no reflections |
 | `--fp` | Legacy Fabry-Perot reflection model (anti-parallel facets only) |
-| `--maxacts N` | Max internal reflections per beam (default: `-n` value) |
 | `--jmax J` | Max Jones matrix norm filter (default: no filter) |
 | `--diffr` | Kirchhoff diffraction weighting for reflected beams |
 | `--nf N` | Min Fresnel number for reflected beams (default: 0.0) |
 | `--rscale α` | Amplitude scaling for reflected beams (default: 1.0) |
 | `--goi` | Incoherent reflected beam accumulation |
-| `--wkb` | WKB phase mode (propagate along incident direction inside medium) |
 
 ### Output Files
 
@@ -117,7 +114,7 @@ adda -shape read test_shape.dat -dpl 10 -m 1.3116 0 \
 
 ### Reflection Modes
 
-**Default (GO-traced beams)** — uses actual GO-traced beam segments with full Jones matrices. All reflected beams up to `nActs = -n` are included with no amplitude filtering. Use `--maxacts`, `--jmax`, `--nf` to restrict if needed.
+**Default (GO-traced beams)** — uses actual GO-traced beam segments with full Jones matrices and complex Fresnel coefficients. All reflected beams up to `nActs = -n` are included with no amplitude filtering. Use `--jmax`, `--nf` to restrict if needed. Absorption (Im(m) > 0) is handled automatically via complex Snell's law and exponential decay along internal paths.
 
 **`--fp`** — legacy Fabry-Perot analytical model. Only works for anti-parallel facet pairs with small Fresnel coefficients.
 

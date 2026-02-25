@@ -166,7 +166,6 @@ void SetArgRules(ArgPP &parser)
  (theta1, theta2, Nphi, Ntheta) when 4 parameters*/
     parser.AddRule("tr", 1, true); // file with trajectories
     parser.AddRule("all", 0, true); // calculate all trajectories
-    parser.AddRule("abs", zero, true, "w"); // accounting of absorbtion
     parser.AddRule("close", 0, true); // closing of program after calculation
     parser.AddRule("o", 1, true); // output folder name
     parser.AddRule("gr", zero, true);
@@ -182,7 +181,6 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("diffr", 0, true); // enable Kirchhoff diffraction weighting for reflected beams
     parser.AddRule("nf", 1, true); // minimum Fresnel number for reflected beams (default 1.0)
     parser.AddRule("rscale", 1, true); // amplitude scaling factor for reflected beams (default 1.0)
-    parser.AddRule("maxacts", 1, true); // max nActs for reflected beams (default = -n)
     parser.AddRule("jmax", 1, true); // max Jones matrix norm for reflected beams (default: no filter)
     parser.AddRule("goi", 0, true); // incoherent reflected beam accumulation (intensity sum)
     parser.AddRule("noinit", 0, true); // skip field files, output only shape (for x_0=0 start)
@@ -266,16 +264,9 @@ int main(int argc, const char* argv[])
     SetArgRules(args);
     args.Parse(argc, argv);
 
-    bool isAbs = args.IsCatched("abs");
-
     double re = args.GetDoubleValue("ri", 0);
     double im = args.GetDoubleValue("ri", 1);
     complex refrIndex = complex(re, im);
-
-    if (!isAbs)
-    {
-        refrIndex = complex(re, 0);
-    }
 
     Particle *particle = nullptr;
 
@@ -459,7 +450,7 @@ int main(int argc, const char* argv[])
     tracer.m_summary = additionalSummary;
     ScatteringRange grid = SetConus(args);
     handler->SetScatteringSphere(grid);
-    handler->SetAbsorptionAccounting(isAbs);
+    handler->SetAbsorptionAccounting(im != 0);
     tracer.SetHandler(handler);
 
     bool addaMode = args.IsCatched("adda");
@@ -507,9 +498,7 @@ int main(int argc, const char* argv[])
             // Run GO tracing (particle already rotated)
             vector<Beam> outBeams;
             tracer.m_scattering->ScatterLight(b, g, outBeams);
-            handler->HandleBeams(outBeams, 0);
             outBeams.clear();
-            handler->WriteMatricesToFile(dirName, 1000);
 
             cout << "Captured " << segments.size() << " internal beam segments" << endl;
 
@@ -527,10 +516,9 @@ int main(int argc, const char* argv[])
                     double maxJN = args.IsCatched("jmax") ? args.GetDoubleValue("jmax") : 1e10;
                     double minNF = args.IsCatched("nf") ? args.GetDoubleValue("nf") : 0.0;
                     double rScale = args.IsCatched("rscale") ? args.GetDoubleValue("rscale") : 1.0;
-                    int maxActs = args.IsCatched("maxacts") ? args.GetIntValue("maxacts") : reflNum;
                     bool goIncoh = args.IsCatched("goi");
                     addaField.AccumulateReflectedBeams(segments, tracer.m_incidentLight.direction,
-                                                       maxJN, args.IsCatched("diffr"), minNF, rScale, maxActs, goIncoh);
+                                                       maxJN, args.IsCatched("diffr"), minNF, rScale, reflNum, goIncoh);
                 }
             }
 

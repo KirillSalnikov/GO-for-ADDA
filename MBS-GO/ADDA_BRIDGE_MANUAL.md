@@ -62,7 +62,6 @@ By default, GO-traced reflected beams are accumulated with all segments up to `n
 |------|-------------|
 | `--norefl` | Skip all reflections |
 | `--fp` | Use legacy Fabry-Perot model instead of GO beams |
-| `--maxacts N` | Max number of internal reflections per beam (default: `-n` value) |
 | `--jmax J` | Max Jones matrix norm filter — skip beams with \|J\| > J (default: no filter) |
 | `--nf N` | Min Fresnel number for GO beams (default: 0.0 = no filter) |
 | `--rscale α` | Amplitude scaling factor for reflected beams (default: 1.0) |
@@ -74,7 +73,6 @@ By default, GO-traced reflected beams are accumulated with all segments up to `n
 | Flag | Description |
 |------|-------------|
 | `--noinit` | Output only shape file, skip field files (for x₀=0 baseline) |
-| `--wkb` | WKB phase: propagate phase along incident direction inside medium |
 
 ## 2.5 Output Files
 
@@ -108,18 +106,19 @@ The method assigns each internal dipole to one illuminated entry facet and fills
 $$\hat{k}_{refr} = \eta\,\hat{k}_{inc} + C\,\hat{n}$$
 where $\eta = 1/n$, $C = \cos\theta_t - \eta\cos\theta_i$
 
-- Compute Fresnel transmission coefficients:
-$$T_s = \frac{2\cos\theta_i}{\cos\theta_i + n\cos\theta_t}, \quad
-  T_p = \frac{2\cos\theta_i}{n\cos\theta_i + \cos\theta_t}$$
+- Compute complex Snell/Fresnel: $\gamma = \sqrt{m^2 - \sin^2\theta_i}$, then
+$$T_s = \frac{2\cos\theta_i}{\cos\theta_i + \gamma}, \quad
+  T_p = \frac{2m\cos\theta_i}{m^2\cos\theta_i + \gamma}$$
 
-- Decompose incident polarization into s/p components and compute refracted E-field amplitude
+- Decompose incident polarization into s/p components and compute refracted E-field amplitude (complex for absorbing $m$)
 
 **Step 2.** For each dipole at position $\vec{r}$:
 
 - Back-project along $-\hat{k}_{refr}$ to the facet plane
 - Check if projection falls inside the facet polygon
-- If yes: assign to this facet, compute field:
-$$\vec{E}(\vec{r}) = \vec{A}_f \cdot \exp\!\left[ik\left(\hat{k}_{inc} \cdot \vec{r}_{proj} + n\,\hat{k}_{refr}\cdot(\vec{r} - \vec{r}_{proj})\right)\right]$$
+- If yes: assign to this facet, compute field with complex phase:
+$$\vec{E}(\vec{r}) = \vec{A}_f \cdot \exp\!\left[ik\left(\hat{k}_{inc} \cdot \Delta\vec{r}_{inc} + (\gamma - \cos\theta_i)(\hat{n}\cdot\Delta\vec{r})\right)\right]$$
+where $\Delta\vec{r} = \vec{r} - \vec{r}_{ref}$. For absorbing $m$, $\operatorname{Im}(\gamma) > 0$ provides exponential decay along the facet normal.
 - If no facet matches: fallback to the primary facet (largest $\cos\theta_i$)
 
 ## 3.2 Key Properties
@@ -133,7 +132,7 @@ $$\vec{E}(\vec{r}) = \vec{A}_f \cdot \exp\!\left[ik\left(\hat{k}_{inc} \cdot \ve
 
 ## 4.1 Method
 
-By default, the bridge uses GO-traced beam segments captured during ray tracing. These segments carry full Jones matrices from Fresnel reflections/transmissions along the beam path.
+By default, the bridge uses GO-traced beam segments captured during ray tracing. These segments carry full Jones matrices from complex Fresnel reflections/transmissions along the beam path. For absorbing particles ($\operatorname{Im}(m) > 0$), the Fresnel coefficients use complex Snell's law ($\cos\theta_t = \sqrt{1 - m^2\sin^2\theta_i}$) and absorption is applied as $\exp(-k\,\kappa\,d)$ along internal paths.
 
 For each reflected beam segment:
 
@@ -145,7 +144,7 @@ For each reflected beam segment:
 
 | Parameter | Default | Flag to change |
 |-----------|---------|----------------|
-| Max reflections (nActs) | = `-n` value | `--maxacts N` |
+| Max reflections (nActs) | = `-n` value | (set by `-n`) |
 | Jones norm filter | no filter (1e10) | `--jmax J` |
 | Fresnel number filter | no filter (0.0) | `--nf N` |
 | Amplitude scaling | 1.0 | `--rscale α` |
@@ -240,8 +239,8 @@ Attempted to smooth entry facet boundaries using Kirchhoff polygon aperture weig
 
 | Flag | Method | RE_000 Y/X (hex 30°) | Status |
 |------|--------|:-----:|--------|
-| (default) | Per-facet GO phase | 0.329 / 0.317 | **Best** |
-| `--wkb` | Phase along incDir inside medium | 0.333 / 0.331 | Kept (marginal) |
+| (default) | Complex Snell/Fresnel per-facet | 0.329 / 0.317 | **Best** |
+| `--wkb` | Phase along incDir inside medium | 0.333 / 0.331 | Removed |
 | `--pwkb` | Pure WKB (no refraction) | 0.454 / 0.551 | Removed |
 | `--sph` | Spherical wavefront from facet center | worse | Removed |
 | `--coh` | Coherent sum from all facets | worse | Removed |
@@ -265,10 +264,9 @@ GO initial field does **not** reduce ADDA iteration count for QMR solver (the de
 ## 7.2 Key Functions
 
 - `BuildDipoleGrid()` --- generates cubic grid, tests each point for particle membership
-- `FillUncoveredPerFacet(incidentDir, useWKB)` --- per-facet PW fill (direct refraction)
+- `FillUncoveredPerFacet(incidentDir)` --- per-facet PW fill with complex Fresnel/Snell
 - `AccumulateReflectedBeams(segments, incDir, maxJN, diffr, minNF, rScale, maxActs, incoh)` --- GO-traced reflected beam accumulation (default)
 - `AddPerFacetReflection(incidentDir)` --- legacy Fabry-Perot reflection (`--fp`)
-- `AccumulateBeamContribution(seg)` --- maps GO beam Jones matrix to E-field at dipoles
 - `WriteGeometryFile()` / `WriteFieldFileY()` / `WriteFieldFileX()` --- ADDA output
 - `DiagnoseGOvsPW(incidentDir)` --- diagnostic: compares GO field vs independent PW
 
@@ -293,9 +291,9 @@ GO initial field does **not** reduce ADDA iteration count for QMR solver (the de
 
 ## 7.5 Phase Convention
 
-$$\text{total\_OP} = \underbrace{\hat{k}_{inc}\cdot\vec{r}_{proj}}_{\text{external path}} + \underbrace{n \cdot \hat{k}_{refr}\cdot(\vec{r} - \vec{r}_{proj})}_{\text{internal path}}$$
+$$\phi = k\left[\hat{k}_{inc}\cdot\Delta\vec{r}_{inc} + \left(\gamma - \cos\theta_i\right)\left(\hat{n}\cdot\Delta\vec{r}\right)\right]$$
 
-where $\vec{r}_{proj}$ is the back-projection of the dipole onto the entry facet plane. Phase $\phi = k \cdot \text{total\_OP}$.
+where $\gamma = \sqrt{m^2 - \sin^2\theta_i}$ (complex for absorbing $m$), $\hat{n}$ is the inward facet normal, and $\Delta\vec{r} = \vec{r} - \vec{r}_{ref}$. For transparent $m$, this reduces to $\hat{k}_{inc}\cdot\vec{r}_{proj} + n\,\hat{k}_{refr}\cdot(\vec{r} - \vec{r}_{proj})$. For absorbing $m$, $\operatorname{Im}(\gamma)$ provides natural amplitude decay along the facet normal direction.
 
 # 8. Known Issues and Bugs Fixed
 

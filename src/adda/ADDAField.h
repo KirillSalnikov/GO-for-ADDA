@@ -64,9 +64,6 @@ public:
     /// Build cubic dipole grid inside convex particle
     void BuildDipoleGrid();
 
-    /// Accumulate E-field from one internal beam segment to all covered dipoles
-    void AccumulateBeamContribution(const InternalBeamSegment &seg);
-
     /// Write DDSCAT6-format geometry file for ADDA (-shape read)
     void WriteGeometryFile(const std::string &filename) const;
 
@@ -76,34 +73,11 @@ public:
     /// Write init field file for X-polarization
     void WriteFieldFileX(const std::string &filename) const;
 
-    /// Fill uncovered dipoles (nContributions==0) with refracted plane wave
-    void FillUncoveredWithPlaneWave(const Point3f &refractedDir,
-                                     const Point3f &incidentDir,
-                                     double Ts, double Tp);
-
     /// Fill uncovered dipoles with per-facet refracted plane waves.
     /// Each illuminated facet gets its own Snell refraction + Fresnel coefficients.
     /// useWKB: phase propagates along incDir (not refracted dir) inside medium.
     void FillUncoveredPerFacet(const Point3f &incidentDir,
                                 bool useWKB = false);
-
-    /// Apply a uniform refracted plane wave to ALL dipoles (for non-convex).
-    /// Uses the given refracted direction with z_max-based phase and
-    /// analytical Fresnel transmission with full 3D polarization.
-    void ApplyUniformBeam(const Point3f &refractedDir,
-                          const Point3f &incidentDir,
-                          double Ts, double Tp);
-
-    int GetNumDipoles() const { return (int)m_dipoles.size(); }
-    int GetNumSegments() const { return m_segCount; }
-    double GetGridSpacing() const { return m_gridSpacing; }
-
-    void IncrementSegCount() { ++m_segCount; }
-
-    /// Generalized analytical reflection: for each illuminated entry facet,
-    /// find first internal reflection facet (any angle), add reflected PW to all dipoles.
-    /// No anti-parallel restriction, no amplitude filter, no FP multi-bounce.
-    void AddAnalyticalReflection(const Point3f &incidentDir, double maxR = 0.25);
 
     /// Add per-facet first reflection (Fabry-Perot correction).
     /// For each dipole assigned to an entry facet, traces refracted beam to exit facet,
@@ -125,9 +99,6 @@ public:
     /// Print contribution stats and compare GO field vs per-facet PW for covered dipoles
     void DiagnoseGOvsPW(const Point3f &incidentDir);
 
-    /// Reset all dipole fields (for diagnostic re-computation)
-    void ResetAllFields();
-
 private:
     bool IsInsideParticle(const Point3f &p) const;
     bool IsInsidePolygon(const Point3f &proj, const Point3f *polyArr,
@@ -142,7 +113,6 @@ private:
     double m_k;             // wave number = 2*PI / wavelength
 
     std::vector<DipoleField> m_dipoles;
-    int m_segCount;
     double m_zMax;         // Top of particle (for consistent phase reference)
 
     // Grid bounding box dimensions

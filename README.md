@@ -17,12 +17,10 @@ Binary: `bin/mbs`
 ```bash
 # Hex column H=20 D=10 µm, ice, 10 reflections
 ./bin/mbs -p 1 20 10 --ri 1.3116 0 -n 10 --fixed 0 0 \
-          -w 0.532 --grid 0 180 1 1 --close
-
+          -w 0.532 --grid 0 180 1 1
 # UV-sphere D=50 µm, absorbing particle (m = 1.5 + 0.01i)
 ./bin/mbs -p 6 50 20 20 --ri 1.5 0.01 -n 10 --fixed 0 0 \
-          -w 0.532 --grid 0 180 1 1 --close
-```
+          -w 0.532 --grid 0 180 1 1```
 
 ## Command-Line Reference
 
@@ -42,7 +40,6 @@ Binary: `bin/mbs`
 |----------|-------------|
 | `-w λ` | Wavelength in µm (required for `--adda`) |
 | `-o NAME` | Output file/directory prefix (default: `M`) |
-| `--close` | Exit after computation (no "press key" prompt) |
 | `-r RATIO` | Beam area restriction ratio for splitting (default: 100) |
 | `--log SEC` | Progress output interval in seconds |
 | `--forced_convex` | Force convex particle tracing |

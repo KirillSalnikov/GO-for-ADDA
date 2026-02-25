@@ -166,7 +166,6 @@ void SetArgRules(ArgPP &parser)
  (theta1, theta2, Nphi, Ntheta) when 4 parameters*/
     parser.AddRule("tr", 1, true); // file with trajectories
     parser.AddRule("all", 0, true); // calculate all trajectories
-    parser.AddRule("close", 0, true); // closing of program after calculation
     parser.AddRule("o", 1, true); // output folder name
 
 
@@ -564,12 +563,7 @@ int main(int argc, const char* argv[])
 
     delete handler;
 
-    cout << endl << "done";
-
-    if (!args.IsCatched("close"))
-    {
-        getchar();
-    }
+    cout << endl << "done" << endl;
 
     return 0;
 }

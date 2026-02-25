@@ -74,10 +74,8 @@ public:
     void WriteFieldFileX(const std::string &filename) const;
 
     /// Fill uncovered dipoles with per-facet refracted plane waves.
-    /// Each illuminated facet gets its own Snell refraction + Fresnel coefficients.
-    /// useWKB: phase propagates along incDir (not refracted dir) inside medium.
-    void FillUncoveredPerFacet(const Point3f &incidentDir,
-                                bool useWKB = false);
+    /// Each illuminated facet gets its own complex Snell/Fresnel coefficients.
+    void FillUncoveredPerFacet(const Point3f &incidentDir);
 
     /// Add per-facet first reflection (Fabry-Perot correction).
     /// For each dipole assigned to an entry facet, traces refracted beam to exit facet,

@@ -420,8 +420,7 @@ void ADDAFieldComputer::WriteFieldFileX(const string &filename) const
     cout << "Wrote X-pol field: " << filename << endl;
 }
 
-void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
-                                               bool useWKB)
+void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir)
 {
     double re_n = real(m_ri);
     double im_n = imag(m_ri);
@@ -561,8 +560,6 @@ void ADDAFieldComputer::FillUncoveredPerFacet(const Point3f &incidentDir,
         cout << " (primary cosI=" << facetList[0].cosI << ")";
     if (pyramidMode)
         cout << " [pyramid mode: using incDir for phase]";
-    if (useWKB)
-        cout << " [WKB phase: propagating along incDir]";
     cout << endl;
 
     int uncovered = 0;

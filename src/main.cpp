@@ -184,7 +184,6 @@ void SetArgRules(ArgPP &parser)
     parser.AddRule("jmax", 1, true); // max Jones matrix norm for reflected beams (default: no filter)
     parser.AddRule("goi", 0, true); // incoherent reflected beam accumulation (intensity sum)
     parser.AddRule("noinit", 0, true); // skip field files, output only shape (for x_0=0 start)
-    parser.AddRule("wkb", 0, true); // WKB phase: propagate along incDir (not refracted) inside medium
 }
 
 ScatteringRange SetConus(ArgPP &parser)
@@ -502,9 +501,8 @@ int main(int argc, const char* argv[])
 
             cout << "Captured " << segments.size() << " internal beam segments" << endl;
 
-            // Per-facet refracted plane waves with boundary smoothing
-            bool useWKB = args.IsCatched("wkb");
-            addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction, useWKB);
+            // Per-facet refracted plane waves with complex Fresnel/Snell
+            addaField.FillUncoveredPerFacet(tracer.m_incidentLight.direction);
 
             // Reflections: GO-traced beams (default), Fabry-Perot (--fp), none (--norefl)
             if (!args.IsCatched("norefl"))

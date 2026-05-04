@@ -388,8 +388,13 @@ int main(int argc, const char* argv[])
         trackGroups.shouldComputeTracksOnly = !args.IsCatched("all");
     }
 
-    int nTheta = args.GetDoubleValue("grid", 2);
-
+    int nTheta = 1;
+    if (args.IsCatched("grid"))
+    {
+        int n = args.GetArgNumber("grid");
+        nTheta = (n == 3) ? (int)args.GetDoubleValue("grid", 2) : (int)args.GetDoubleValue("grid", 3);
+    }
+    
     additionalSummary += "Method: Geometrical optics";
 
     TracerGO tracer(particle, reflNum, dirName);
@@ -412,8 +417,11 @@ int main(int argc, const char* argv[])
     }
 
     tracer.m_summary = additionalSummary;
-    ScatteringRange grid = SetConus(args);
-    handler->SetScatteringSphere(grid);
+    if (args.IsCatched("grid"))
+    {
+        ScatteringRange grid = SetConus(args);
+        handler->SetScatteringSphere(grid);
+    }
     handler->SetAbsorptionAccounting(im != 0);
     tracer.SetHandler(handler);
 
